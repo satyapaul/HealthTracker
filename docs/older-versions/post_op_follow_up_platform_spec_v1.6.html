@@ -1,0 +1,1924 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>post_op_follow_up_platform_spec_v1.6.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="application-specification-post-operative-investigation-follow-up-platform">Application Specification: Post-Operative Investigation Follow-Up Platform</h1>
+<h2 id="1-document-overview">1. Document Overview</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Document title</strong></td>
+<td>Post-Operative Investigation Flow Chart — Digital Follow-Up Platform</td>
+</tr>
+<tr>
+<td><strong>Version</strong></td>
+<td>1.6 (Draft)</td>
+</tr>
+<tr>
+<td><strong>Date</strong></td>
+<td>August 23, 2026</td>
+</tr>
+<tr>
+<td><strong>Source inputs</strong></td>
+<td>Google Doc (&quot;Automate follow up&quot;), sample flowchart (pediatric post-op liver patient), Requirement Update: Conversational Chat &amp; Multi-Doctor Collaboration/Case Transfer</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="2-problem-statement">2. Problem Statement</h2>
+<p>Remote patients recovering from major surgeries (specifically <strong>Post-Operative Liver Transplant</strong> and chronic liver disease face significant challenges tracking recurring lab reports, liver enzyme levels, immunosuppressant drug trough levels (Tacrolimus, Everolimus), vital signs, and complex medication regimens in paper charts or spreadsheets, sharing updates via unorganized email or WhatsApp.</p>
+<p>Surgeons and hepatologists need to review longitudinal lab trends, adjust medication dosages (often annotating changes in red ink), request targeted follow-up tests, and collaborate with co-managing doctors and specialists. Additionally, patient care extends over years or decades, requiring seamless handoffs between primary transplant surgeons and consulting hepatologists or secondary specialists.</p>
+<p>Remote patients currently track post-operative lab results and immunosuppressant medication doses in a <strong>paper flowchart</strong>, then share updates with their doctor via <strong>email or WhatsApp</strong>. The doctor reviews the chart, adjusts medication doses (often annotating changes in a different color), and replies with instructions. The patient manually updates the chart and repeats the cycle at the next follow-up.</p>
+<p>Furthermore, between periodic lab updates, patients lack a secure, audited channel to ask quick questions or report emerging symptoms, forcing reliance on unorganized WhatsApp chats. Additionally, post-operative transplant care frequently involves multiple clinicians (surgeons, hepatologists, pediatricians). Currently, there is no structured way for a primary doctor to grant secondary doctors access to a patient's chart or formally transfer primary case ownership when duty shifts or clinical handoffs occur.</p>
+<p>This workflow is error-prone, hard to audit, fragmented across un-encrypted channels, and inefficient for both patients and care teams. The goal is to <strong>digitize the flowchart, automate the follow-up loop, provide integrated clinical chat, and enable multi-doctor collaboration and case transfer</strong> while preserving the familiar tabular format and clinical semantics.</p>
+<p>While <strong>Release 1 is dedicated to Post-Operative Liver Transplant care</strong>, the underlying platform is built on an <strong>extensible, protocol-driven architecture</strong> that allows seamless scaling to other long-term chronic conditions (such as Renal Transplant, Chronic Kidney Disease, Heart Failure, and Diabetes) without core codebase refactoring.</p>
+<hr>
+<h2 id="3-goals--success-criteria">3. Goals &amp; Success Criteria</h2>
+<h3 id="primary-goals">Primary goals</h3>
+<ol>
+<li>Replace the paper flowchart with a structured digital record.</li>
+<li>Let patients enter lab values and current medication doses remotely.</li>
+<li>Let doctors review entries, prescribe/adjust doses, and respond in one place.</li>
+<li>Deliver doctor responses back to the patient automatically (replacing manual email/WhatsApp for the core loop).</li>
+<li><strong>Provide secure, integrated conversational chat</strong> between the patient/caregiver and authorized care team doctors, complete with media attachments, voice notes, and clinical event linking.</li>
+<li><strong>Support multi-doctor participation</strong>, enabling the primary doctor (or patient) to authorize secondary/consulting doctors with granular permissions (co-managing vs. view-only consult).</li>
+<li><strong>Enable formal patient case transfer</strong> allowing the primary doctor to transfer primary case ownership to another clinician with a full handoff audit trail.</li>
+<li>Maintain a longitudinal history of labs, drug levels, doses, dose changes, chat logs, and doctor access grants.</li>
+<li>Send automated <strong>SMS and WhatsApp reminders</strong> for upcoming follow-up milestones so patients do not miss lab submissions.</li>
+</ol>
+<h3 id="success-criteria">Success criteria</h3>
+<ul>
+<li>A patient can submit a new follow-up row in under 5 minutes on mobile.</li>
+<li>A doctor can review a submission and send a dose adjustment in under 3 minutes.</li>
+<li>Every dose change, chat message, authorization grant, and case transfer is fully traceable (who, when, prior vs new state).</li>
+<li>Primary doctors can grant consulting access or transfer a patient case to another doctor in under 1 minute with instant permission updates.</li>
+<li>Patients and doctors can send and view contextual chat messages directly tied to flowchart submissions and lab trends.</li>
+<li>The digital chart mirrors the paper layout closely enough that existing users can adopt it without retraining.</li>
+</ul>
+<hr>
+<h2 id="4-users--personas">4. Users &amp; Personas</h2>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Description</th>
+<th>Primary needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Patient / Caregiver</strong></td>
+<td>Remote post-op patient (or parent/guardian for pediatric cases)</td>
+<td>Simple data entry, view doctor instructions, upload lab reports, message care team, view active care team doctors</td>
+</tr>
+<tr>
+<td><strong>Primary Doctor</strong></td>
+<td>Lead transplant/hepatology surgeon or consultant owning the case</td>
+<td>Review trends, enter/adjust doses, request tests, reply to patient, chat with patient, authorize co-managing/consulting doctors, transfer case ownership</td>
+</tr>
+<tr>
+<td><strong>Co-Managing Doctor</strong></td>
+<td>Authorized care team doctor (e.g. Dr. Rajesh Dey, Dr. Tejai B, Dr. Barun) with edit/prescribe access</td>
+<td>Review patient chart, co-prescribe doses, participate in patient chat, enter clinical notes</td>
+</tr>
+<tr>
+<td><strong>Consulting Doctor</strong></td>
+<td>Specialist called in for specific advice (e.g. Nephrologist, Infectious Disease specialist)</td>
+<td>View-only chart access, review labs, add clinical recommendations/notes in consult thread</td>
+</tr>
+<tr>
+<td><strong>Transferred (Former) Doctor</strong></td>
+<td>Doctor who previously owned the patient case</td>
+<td>Read-only audit access to historical entries recorded during their tenure as primary doctor</td>
+</tr>
+<tr>
+<td><strong>Admin</strong></td>
+<td>Clinic/hospital staff</td>
+<td>Onboard patients, manage doctor accounts, execute administrative case transfers when required</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="5-current-workflow-as-is">5. Current Workflow (As-Is)</h2>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant P as Patient
+    participant C as Email/WhatsApp
+    participant D as Doctor
+
+    P->>P: Enter labs + current med doses in paper flowchart
+    P->>C: Send flowchart photo/PDF + lab reports
+    C->>D: Deliver submission
+    D->>D: Review labs, levels, and doses
+    D->>C: Reply with dose changes / new tests
+    C->>P: Receive instructions
+    P->>P: Manually update flowchart for next cycle
+    Note over P,D: Cycle repeats at each follow-up interval
+</div></code></pre>
+<p><strong>Observed from sample flowchart:</strong></p>
+<ul>
+<li>Multiple dated rows track progress (e.g., 13/6/26 → 13/7/26).</li>
+<li>Lab columns cover hematology, liver function, renal function, electrolytes, and drug levels.</li>
+<li>Medication dose columns: <strong>Neoral/Tac</strong>, <strong>Everolimus</strong>, <strong>Aza/MPA</strong>, <strong>Pred</strong>.</li>
+<li>Drug level columns: <strong>Tac level</strong>, <strong>EVO level</strong> (Everolimus level).</li>
+<li>Dose adjustments are visually distinguished (e.g., red ink: <code>4/4</code> → <code>2/2</code>).</li>
+<li>Patient header includes diagnosis, surgery date, histopathology, and anastomosis details.</li>
+<li>Footer instructs: <em>&quot;Enter further investigation reports in above table and send to drrajeshdey@gmail.com&quot;</em>.</li>
+</ul>
+<hr>
+<h2 id="6-proposed-solution-to-be">6. Proposed Solution (To-Be)</h2>
+<p>A <strong>web/mobile application</strong> featuring:</p>
+<ol>
+<li>A <strong>Patient portal</strong> — digital flowchart, row entry, lab upload, conversational chat, care team view.</li>
+<li>A <strong>Doctor portal</strong> — dashboard, chart review, dose entry, clinical reply, care team chat, authorization delegation, case transfer dialog.</li>
+<li>A <strong>Conversational Chat Engine</strong> — 1:1 and team messaging between patient and authorized doctors, complete with voice notes, attachments, and automated system event posts.</li>
+<li>A <strong>Care Team &amp; Transfer Authorization Engine</strong> — role-based access control for primary, co-managing, consulting, and transferred doctors.</li>
+<li>A <strong>Notification layer</strong> — alerts for lab submissions, doctor replies, chat messages, consult invitations, and case transfers.</li>
+<li>An <strong>Audit trail</strong> — immutable history of labs, dose edits, chat transcripts, permission grants, and case handovers.</li>
+</ol>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph PatientSide [Patient Portal]
+        A[Enter lab values & current doses]
+        B[Upload lab PDFs]
+        C[Patient-Doctor Chat]
+        D[View Care Team]
+    end
+
+    subgraph Platform [Platform Core]
+        E[Flowchart Record]
+        F[Conversational Chat Engine]
+        G[Care Team & Transfer Engine]
+        H[Notification Engine & Audit Log]
+    end
+
+    subgraph DoctorSide [Doctor Portal]
+        I[Review & Prescribe Doses]
+        J[Clinical Reply & Orders]
+        K[Doctor Chat Response]
+        L[Authorize Consulting Doctor]
+        M[Transfer Case Ownership]
+    end
+
+    A --> E
+    B --> E
+    C <--> F
+    D <--> G
+
+    E --> H
+    F --> H
+    G --> H
+
+    I --> E
+    J --> E
+    K <--> F
+    L --> G
+    M --> G
+    H --> I
+</div></code></pre>
+<hr>
+<h2 id="7-functional-requirements">7. Functional Requirements</h2>
+<h3 id="71-patient-profile--chart-header">7.1 Patient profile &amp; chart header</h3>
+<p>Each patient chart stores static header fields matching the paper form:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example from sample</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Patient name</td>
+<td>Raghavendra S. Dyk</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Age / sex</td>
+<td>4.5 yrs / M</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Hospital / Max ID</td>
+<td>SHMS.750590</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Date of operation</td>
+<td>26/05/2026</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Diagnosis</td>
+<td>DCLD - ? AIH</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Histopathology</td>
+<td>Biliary Cirrhosis (PBC)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Type of biliary anastomosis</td>
+<td>Free text</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Patient photo</td>
+<td>Passport-size image</td>
+<td>Optional</td>
+</tr>
+<tr>
+<td>Primary Doctor</td>
+<td>Dr. Rajesh Dey</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Authorized Care Team</td>
+<td>Dr. Tejai B (Co-Managing), Dr. Barun (Consultant)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Primary reporting email</td>
+<td>drrajeshdey@gmail.com</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="72-follow-up-row-investigation-table">7.2 Follow-up row (investigation table)</h3>
+<p>Each follow-up is one <strong>dated row</strong> in the flowchart. All columns below are captured on every submission unless marked optional.</p>
+<h4 id="721-complete-field-catalog">7.2.1 Complete field catalog</h4>
+<p>The following table is the <strong>authoritative list</strong> of flowchart fields. UI labels may use clinic-preferred abbreviations; the system stores values using the canonical field key.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>UI label</th>
+<th>Canonical key</th>
+<th>Category</th>
+<th>Type</th>
+<th>Unit / format</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>—</td>
+<td>PP Date</td>
+<td><code>pp_date</code></td>
+<td>Meta</td>
+<td>Date</td>
+<td>DD/MM/YYYY</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Hb</td>
+<td><code>hb</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>g/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TLC</td>
+<td><code>tlc</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>×10³/µL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PLT</td>
+<td><code>plt</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>×10³/µL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>4</td>
+<td>AFP</td>
+<td><code>afp</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>ng/mL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>5</td>
+<td>INR</td>
+<td><code>inr</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>ratio</td>
+<td>No</td>
+</tr>
+<tr>
+<td>6</td>
+<td>PTT</td>
+<td><code>ptt</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>seconds</td>
+<td>No</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Bilirubin Total</td>
+<td><code>bilirubin_total</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>mg/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Bilirubin Direct</td>
+<td><code>bilirubin_direct</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>mg/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>9</td>
+<td>SGOT</td>
+<td><code>sgot</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>U/L</td>
+<td>No</td>
+</tr>
+<tr>
+<td>10</td>
+<td>SGPT</td>
+<td><code>sgpt</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>U/L</td>
+<td>No</td>
+</tr>
+<tr>
+<td>11</td>
+<td>ALK PHOS</td>
+<td><code>alk_phos</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>U/L</td>
+<td>No</td>
+</tr>
+<tr>
+<td>12</td>
+<td>GGT</td>
+<td><code>ggt</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>U/L</td>
+<td>No</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Albumin</td>
+<td><code>albumin</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>g/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Na/K</td>
+<td><code>na_k</code></td>
+<td>Lab</td>
+<td>Text or split numeric</td>
+<td>e.g. <code>136/4.2</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Urea</td>
+<td><code>urea</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>mg/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Creatinine</td>
+<td><code>creatinine</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>mg/dL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>17</td>
+<td>HbA1c</td>
+<td><code>hba1c</code></td>
+<td>Lab</td>
+<td>Numeric</td>
+<td>%</td>
+<td>No</td>
+</tr>
+<tr>
+<td>18</td>
+<td>Tac Level</td>
+<td><code>tac_level</code></td>
+<td>Drug level</td>
+<td>Numeric</td>
+<td>ng/mL (trough C0)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>19</td>
+<td>EVO level</td>
+<td><code>evo_level</code></td>
+<td>Drug level</td>
+<td>Numeric</td>
+<td>ng/mL</td>
+<td>No</td>
+</tr>
+<tr>
+<td>20</td>
+<td>Neoral/Tac</td>
+<td><code>neoral_tac</code></td>
+<td>Medication dose</td>
+<td>Dose notation</td>
+<td>e.g. <code>4/4</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>21</td>
+<td>Everolimus</td>
+<td><code>everolimus</code></td>
+<td>Medication dose</td>
+<td>Dose notation</td>
+<td>e.g. <code>1/0</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>22</td>
+<td>Aza/MPA</td>
+<td><code>aza_mpa</code></td>
+<td>Medication dose</td>
+<td>Dose notation</td>
+<td>e.g. <code>1/1</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>23</td>
+<td>Pred</td>
+<td><code>pred</code></td>
+<td>Medication dose</td>
+<td>Dose notation</td>
+<td>e.g. <code>5</code> or <code>5/0</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>24</td>
+<td>Wt</td>
+<td><code>wt</code></td>
+<td>Clinical</td>
+<td>Numeric</td>
+<td>kg</td>
+<td>No</td>
+</tr>
+<tr>
+<td>25</td>
+<td>Comments</td>
+<td><code>comments</code></td>
+<td>Notes</td>
+<td>Text</td>
+<td>Free text per row</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Legacy / alias mapping</strong> (paper form and earlier spec versions):</p>
+<table>
+<thead>
+<tr>
+<th>Legacy label</th>
+<th>Maps to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Platelet count</td>
+<td>PLT (<code>plt</code>)</td>
+</tr>
+<tr>
+<td>Bil Total</td>
+<td>Bilirubin Total (<code>bilirubin_total</code>)</td>
+</tr>
+<tr>
+<td>Alb</td>
+<td>Albumin (<code>albumin</code>)</td>
+</tr>
+<tr>
+<td>Creat</td>
+<td>Creatinine (<code>creatinine</code>)</td>
+</tr>
+<tr>
+<td>Tac/C0 level, Tec Level</td>
+<td>Tac Level (<code>tac_level</code>)</td>
+</tr>
+<tr>
+<td>Everolimus level</td>
+<td>EVO level (<code>evo_level</code>)</td>
+</tr>
+<tr>
+<td>Tac/Cyclo, Neoral, Tacrolimus/Cyclosporine</td>
+<td>Neoral/Tac (<code>neoral_tac</code>)</td>
+</tr>
+<tr>
+<td>Wys, Wysolone, Prednisolone</td>
+<td>Pred (<code>pred</code>)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="722-lab-columns">7.2.2 Lab columns</h4>
+<p>All lab fields are optional on each row (partial entry allowed). Numeric validation applies where applicable.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Canonical key</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hb</td>
+<td><code>hb</code></td>
+<td>Hemoglobin</td>
+</tr>
+<tr>
+<td>TLC</td>
+<td><code>tlc</code></td>
+<td>Total leukocyte count</td>
+</tr>
+<tr>
+<td>PLT</td>
+<td><code>plt</code></td>
+<td>Platelet count</td>
+</tr>
+<tr>
+<td>AFP</td>
+<td><code>afp</code></td>
+<td>Alpha-fetoprotein</td>
+</tr>
+<tr>
+<td>INR</td>
+<td><code>inr</code></td>
+<td>International normalized ratio</td>
+</tr>
+<tr>
+<td>PTT</td>
+<td><code>ptt</code></td>
+<td>Partial thromboplastin time</td>
+</tr>
+<tr>
+<td>Bilirubin Total</td>
+<td><code>bilirubin_total</code></td>
+<td>Total bilirubin</td>
+</tr>
+<tr>
+<td>Bilirubin Direct</td>
+<td><code>bilirubin_direct</code></td>
+<td>Direct (conjugated) bilirubin</td>
+</tr>
+<tr>
+<td>SGOT</td>
+<td><code>sgot</code></td>
+<td>AST</td>
+</tr>
+<tr>
+<td>SGPT</td>
+<td><code>sgpt</code></td>
+<td>ALT</td>
+</tr>
+<tr>
+<td>ALK PHOS</td>
+<td><code>alk_phos</code></td>
+<td>Alkaline phosphatase</td>
+</tr>
+<tr>
+<td>GGT</td>
+<td><code>ggt</code></td>
+<td>Gamma-glutamyl transferase</td>
+</tr>
+<tr>
+<td>Albumin</td>
+<td><code>albumin</code></td>
+<td>Serum albumin</td>
+</tr>
+<tr>
+<td>Na/K</td>
+<td><code>na_k</code></td>
+<td>Sodium/potassium — single field or split <code>na</code> + <code>k</code></td>
+</tr>
+<tr>
+<td>Urea</td>
+<td><code>urea</code></td>
+<td>Blood urea</td>
+</tr>
+<tr>
+<td>Creatinine</td>
+<td><code>creatinine</code></td>
+<td>Serum creatinine</td>
+</tr>
+<tr>
+<td>HbA1c</td>
+<td><code>hba1c</code></td>
+<td>Glycated hemoglobin</td>
+</tr>
+</tbody>
+</table>
+<h4 id="723-drug-level-columns">7.2.3 Drug level columns</h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Canonical key</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tac Level</td>
+<td><code>tac_level</code></td>
+<td>Tacrolimus trough (C0); supersedes legacy labels Tac/C0 level, Tec Level</td>
+</tr>
+<tr>
+<td>EVO level</td>
+<td><code>evo_level</code></td>
+<td>Everolimus serum level; alias Everolimus level</td>
+</tr>
+</tbody>
+</table>
+<h4 id="724-medication-dose-columns">7.2.4 Medication dose columns</h4>
+<p>Patient-entered on submit; doctor may override on review. Dose notation format to be confirmed with clinic (see §17 open questions).</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Canonical key</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Neoral/Tac</td>
+<td><code>neoral_tac</code></td>
+<td>Combined tacrolimus/cyclosporine (Neoral) dose; legacy label Tac/Cyclo</td>
+</tr>
+<tr>
+<td>Everolimus</td>
+<td><code>everolimus</code></td>
+<td>Everolimus <strong>dose</strong> (distinct from EVO level)</td>
+</tr>
+<tr>
+<td>Aza/MPA</td>
+<td><code>aza_mpa</code></td>
+<td>Azathioprine or mycophenolate dose</td>
+</tr>
+<tr>
+<td>Pred</td>
+<td><code>pred</code></td>
+<td>Prednisolone / Wysolone dose; legacy label Wys</td>
+</tr>
+</tbody>
+</table>
+<h4 id="725-weight-comments-and-attachments">7.2.5 Weight, comments, and attachments</h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Canonical key</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wt</td>
+<td><code>wt</code></td>
+<td>Body weight in kg</td>
+</tr>
+<tr>
+<td>Comments</td>
+<td><code>comments</code></td>
+<td>Free-text notes for the row (patient or doctor); visible in chart and exports</td>
+</tr>
+<tr>
+<td>Attachments</td>
+<td><code>attachments[]</code></td>
+<td>Lab report PDFs/images (see §7.3 P-03); not a flowchart column but linked to the row</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Business rules:</strong></p>
+<ul>
+<li>On <strong>patient submission</strong>, the patient fills lab values, drug levels, <strong>current medication doses</strong>, weight, and optional <strong>Comments</strong>.</li>
+<li>On <strong>doctor review</strong>, medication dose columns may appear <strong>blank</strong> until the doctor enters <strong>prescribed doses</strong> for the next interval; doctor may add or amend <strong>Comments</strong>.</li>
+<li>Doctor-entered doses must be visually distinct from patient-reported doses (replacing &quot;red ink&quot;).</li>
+<li>Support <strong>dose change history</strong> per medication column (old value → new value, timestamp, prescribing doctor).</li>
+<li><strong>Comments</strong> are append-only in the audit log when edited after review (original text retained).</li>
+</ul>
+<hr>
+<h3 id="73-patient-portal-features">7.3 Patient portal features</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P-01</td>
+<td>View full digital flowchart (read-only history + editable new row)</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-02</td>
+<td>Add a new follow-up row supporting all lab, drug level, and medication dose fields</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-03</td>
+<td>Upload lab report files (PDF/image) linked to a follow-up date</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-04</td>
+<td>Submit follow-up for doctor review</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-05</td>
+<td>View doctor's latest response (prescribed doses, additional tests, notes)</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-06</td>
+<td>Receive notifications when doctor responds or messages in chat</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-07</td>
+<td>View dose change highlights on the chart</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-08</td>
+<td><strong>Conversational Chat</strong>: Send text, voice notes, and image attachments to care team</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>P-09</td>
+<td><strong>Care Team View</strong>: View current primary doctor and authorized co-managing/consulting doctors</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="74-doctor-portal-features">7.4 Doctor portal features</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D-01</td>
+<td>Dashboard of patients with pending submissions and unread chat messages</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-02</td>
+<td>Open patient chart with tabular history and trend view</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-03</td>
+<td>Review patient-entered labs, drug levels, and current doses</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-04</td>
+<td>Enter prescribed doses in medication columns for the reviewed visit</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-05</td>
+<td>Send structured response to patient</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-06</td>
+<td>Free-text clinical reply (additional medications, lifestyle advice, etc.)</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-07</td>
+<td>Request additional investigations (structured checklist + notes)</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-08</td>
+<td>View uploaded lab reports inline or downloadable</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-09</td>
+<td>See prior dose changes and who made them</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-10</td>
+<td><strong>Conversational Chat</strong>: Reply to patient chat queries, send voice notes, attach files</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-11</td>
+<td><strong>Care Team Delegation</strong>: Authorize secondary doctors with specific permission levels</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>D-12</td>
+<td><strong>Case Transfer</strong>: Initiate and execute patient case transfer to another primary doctor</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="75-notifications--delivery">7.5 Notifications &amp; delivery</h3>
+<table>
+<thead>
+<tr>
+<th>Channel</th>
+<th>Use case</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>In-app</td>
+<td>Submission received, doctor responded, new chat message, case transfer notification</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>Email</td>
+<td>Official record delivery, consult invitation, case handoff summaries</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>SMS</td>
+<td>Milestone reminders, urgent chat alerts, OTP</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>WhatsApp</td>
+<td>Milestone reminders, doctor responses, chat message alerts</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>Push (mobile)</td>
+<td>Real-time chat messages, time-sensitive doctor replies</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="76-milestone-reminders-sms--whatsapp">7.6 Milestone reminders (SMS &amp; WhatsApp)</h3>
+<p><em>(Retained as specified in Section 7.6).</em></p>
+<hr>
+<h3 id="77-reporting--export">7.7 Reporting &amp; export</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R-01</td>
+<td>Export chart as PDF matching paper layout</td>
+<td>Should</td>
+</tr>
+<tr>
+<td>R-02</td>
+<td>Print-friendly flowchart view</td>
+<td>Should</td>
+</tr>
+<tr>
+<td>R-03</td>
+<td>Export audit log of dose changes, chat transcripts, and case transfer history</td>
+<td>Could</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="78-conversational-chat-doctorpatient--care-team">7.8 Conversational Chat (Doctor–Patient &amp; Care Team)</h3>
+<p>The platform provides a secure, HIPAA/PHI-compliant messaging hub replacing informal WhatsApp/email communication.</p>
+<h4 id="781-chat-scope--features">7.8.1 Chat Scope &amp; Features</h4>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C-01</td>
+<td><strong>Patient-Care Team Thread</strong>: Each patient chart has an active main chat thread connecting the patient/caregiver with all authorized doctors on their care team.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-02</td>
+<td><strong>Multi-Format Messages</strong>: Support text messages, image attachments (photos of symptoms/incision), document attachments (PDFs), and recorded <strong>voice notes</strong>.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-03</td>
+<td><strong>Automated Clinical System Messages</strong>: System posts automated event cards into the chat thread when key actions occur (e.g. <em>&quot;Patient submitted labs for 23/08/2026&quot;</em>, <em>&quot;Dr. Dey updated Pred dose to 2.5mg&quot;</em>, <em>&quot;Case transferred to Dr. Tejai B&quot;</em>).</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-04</td>
+<td><strong>Contextual Item Linking</strong>: Users can quote or link a specific message to a follow-up row ID, lab value, or dose change for clinical context.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-05</td>
+<td><strong>Read Receipts &amp; Status Indicators</strong>: Show message status (Sent, Delivered, Read by Doctor / Read by Patient) with timestamps.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-06</td>
+<td><strong>Non-Emergency Disclaimer Banner</strong>: Permanent banner at top of chat: <em>&quot;Chat is for non-urgent follow-up queries only. In case of medical emergency, contact ER immediately.&quot;</em></td>
+<td>Must</td>
+</tr>
+<tr>
+<td>C-07</td>
+<td><strong>Urgency Triage Flag</strong>: Patient can mark a message as &quot;Routine Query&quot; or &quot;Symptom Concern&quot;; symptom concerns highlight in doctor dashboard.</td>
+<td>Should</td>
+</tr>
+<tr>
+<td>C-08</td>
+<td><strong>Doctor-to-Doctor Internal Notes / Consult Thread</strong>: Secondary thread on the same patient chart visible ONLY to authorized doctors (hidden from patient) for inter-specialist case discussions.</td>
+<td>Should</td>
+</tr>
+<tr>
+<td>C-09</td>
+<td><strong>Search &amp; Filter</strong>: Search chat history by key terms or filter by media/attachments.</td>
+<td>Could</td>
+</tr>
+<tr>
+<td>C-10</td>
+<td><strong>Immutable Audit Log</strong>: Chat transcripts cannot be edited or deleted by users; retained as part of permanent electronic health record.</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="79-multi-doctor-participation-authorization--case-transfer">7.9 Multi-Doctor Participation, Authorization &amp; Case Transfer</h3>
+<p>Post-operative care frequently requires collaboration between multiple doctors or transferring patient ownership due to shifts, sabbaticals, or specialty handovers.</p>
+<h4 id="791-doctor-roles--access-hierarchy">7.9.1 Doctor Roles &amp; Access Hierarchy</h4>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Scope of Access &amp; Permissions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Primary Doctor</strong></td>
+<td>Full control: view chart, prescribe/adjust doses, order labs, reply &amp; chat with patient, invite/authorize secondary doctors, modify access levels, initiate case transfer.</td>
+</tr>
+<tr>
+<td><strong>Co-Managing Doctor</strong></td>
+<td>Full clinical care access: view chart, prescribe/adjust doses, order labs, reply &amp; chat with patient. <em>Cannot authorize new doctors or transfer case ownership.</em></td>
+</tr>
+<tr>
+<td><strong>Consulting Doctor (View &amp; Note)</strong></td>
+<td>Specialist access: view chart, read patient chat, post clinical advice in inter-doctor consult thread. <em>Cannot adjust doses or prescribe directly unless authorized.</em></td>
+</tr>
+<tr>
+<td><strong>Transferred (Former) Primary Doctor</strong></td>
+<td>Historical read-only access: view chart entries and chat logs recorded <em>up to the timestamp of transfer</em>. No access to post-transfer entries unless re-invited.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="792-authorization--delegation-requirements">7.9.2 Authorization &amp; Delegation Requirements</h4>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-01</td>
+<td><strong>Grant Doctor Access</strong>: Primary Doctor (or Admin) can invite another registered doctor to join the patient's care team by email or doctor ID.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-02</td>
+<td><strong>Access Level Specification</strong>: Primary Doctor selects access role (<code>Co-Managing</code> vs <code>Consulting View-Only</code>) when adding a doctor.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-03</td>
+<td><strong>Time-Bound Access</strong>: Primary Doctor can optionally set an expiration date for consulting access (e.g., 14-day consult).</td>
+<td>Should</td>
+</tr>
+<tr>
+<td>T-04</td>
+<td><strong>Revoke / Modify Access</strong>: Primary Doctor can revoke access or adjust permissions of any secondary doctor at any time.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-05</td>
+<td><strong>Patient Care Team Visibility</strong>: Patient portal displays active care team members with their names, photos, and clinical roles.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-06</td>
+<td><strong>Patient Notification</strong>: Patient is notified via app/SMS/WhatsApp whenever a new doctor is authorized or added to their care team.</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<h4 id="793-patient-case-transfer-requirements">7.9.3 Patient Case Transfer Requirements</h4>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-07</td>
+<td><strong>Initiate Transfer</strong>: Primary Doctor can select a target doctor and initiate a primary ownership transfer request.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-08</td>
+<td><strong>Handoff Summary</strong>: Transfer dialog requires a structured handoff note (reason for transfer, current clinical status, key warnings).</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-09</td>
+<td><strong>Transfer Acceptance Workflow</strong>: Target doctor receives handoff notification and must accept (or decline with reason) to finalize transfer.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-10</td>
+<td><strong>Admin Override Transfer</strong>: Clinic Admin can execute an immediate transfer without target acceptance (e.g. emergency doctor unavailability).</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-11</td>
+<td><strong>Ownership Transition</strong>: Upon transfer completion, target doctor becomes <code>Primary Doctor</code>; former doctor transitions to <code>Transferred (Read-Only)</code> or <code>Co-Managing</code> based on transfer settings.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-12</td>
+<td><strong>Patient &amp; Team Notification</strong>: System broadcasts automated notifications to patient, incoming primary doctor, outgoing primary doctor, and care team.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-13</td>
+<td><strong>System Chat Post</strong>: Automated system message posted into patient chat documenting transfer: <em>&quot;Primary care transferred from Dr. Rajesh Dey to Dr. Tejai B on [date]&quot;</em>.</td>
+<td>Must</td>
+</tr>
+<tr>
+<td>T-14</td>
+<td><strong>Transfer Audit Trail</strong>: Log full history of case transfers (from_doctor, to_doctor, initiated_by, handoff_note, accepted_at) in immutable audit log.</td>
+<td>Must</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="8-user-flows">8. User Flows</h2>
+<p><em>(Flows 8.1 to 8.4 retained from previous spec).</em></p>
+<h3 id="85-conversational-chat-flow">8.5 Conversational Chat Flow</h3>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant P as Patient
+    participant B as Backend / Chat Engine
+    participant D as Primary / Co-Managing Doctor
+
+    P->>P: Open chat tab in patient portal
+    P->>B: Send text / voice note / photo ("Incision slightly red today")
+    B->>B: Save message & trigger push/WhatsApp alert
+    B->>D: Deliver notification ("New chat message from Raghavendra")
+    D->>D: Tap alert -> Opens patient chat view
+    D->>B: Record voice note ("Apply ointment X, upload photo tomorrow")
+    B->>P: Deliver doctor message & update read receipts
+    Note over P,B: System posts clinical card when doctor updates dose in chart
+</div></code></pre>
+<h3 id="86-multi-doctor-authorization-flow">8.6 Multi-Doctor Authorization Flow</h3>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant D1 as Primary Doctor (Dr. Dey)
+    participant B as Backend
+    participant D2 as Consulting Doctor (Dr. Barun)
+    participant P as Patient
+
+    D1->>B: Select Patient -> Care Team -> "Add Doctor"
+    D1->>B: Enter Dr. Barun's ID & Role = "Consulting View-Only" (Expires 14 days)
+    B->>B: Create DoctorAuthorization record
+    B->>D2: Notify Dr. Barun ("You have been added to Raghavendra's care team")
+    B->>P: Notify Patient ("Dr. Barun joined your care team as Consultant")
+    D2->>B: Access patient chart & review labs (Read-only + inter-doctor notes)
+</div></code></pre>
+<h3 id="87-patient-case-transfer-flow">8.7 Patient Case Transfer Flow</h3>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant D1 as Outgoing Primary (Dr. Dey)
+    participant B as Backend
+    participant D2 as Incoming Primary (Dr. Tejai B)
+    participant P as Patient
+
+    D1->>B: Select Patient -> "Transfer Primary Ownership"
+    D1->>B: Select Dr. Tejai B + Enter Handoff Note ("Patient stable 3 months post-op")
+    B->>D2: Deliver Transfer Request Notification
+    D2->>D2: Review Handoff Note & Patient History
+    D2->>B: Click "Accept Transfer"
+    B->>B: Update Patient.primary_doctor_id = Dr. Tejai B
+    B->>B: Update Dr. Dey role = Transferred (Read-Only audit access)
+    B->>B: Log entry in CaseTransferLog
+    B->>P: Notify Patient ("Primary doctor is now Dr. Tejai B")
+    B->>P: System message posted in Chat Thread
+</div></code></pre>
+<hr>
+<h2 id="9-data-model-conceptual">9. Data Model (Conceptual)</h2>
+<pre class="hljs"><code><div>Patient
+├── id, name, age, sex, max_id, photo_url
+├── date_of_operation, diagnosis, histopathology, anastomosis_type
+├── primary_doctor_id (FK to User where role=doctor)
+├── assigned_doctors[] (computed list of active authorized doctors)
+├── contact_email, phone_number, whatsapp_number
+└── reminder_preferences { sms_enabled, whatsapp_enabled, timezone }
+
+DoctorAuthorization
+├── id, patient_id, primary_doctor_id
+├── authorized_doctor_id (FK to User)
+├── access_level [co_managing | consult_view]
+├── granted_by (user_id), granted_at
+├── expires_at (optional)
+├── status [active | revoked | expired]
+└── revoked_at, revoked_by
+
+CaseTransferLog
+├── id, patient_id
+├── previous_primary_doctor_id
+├── new_primary_doctor_id
+├── initiated_by (user_id)
+├── handoff_note (text)
+├── status [pending | accepted | declined | admin_forced]
+├── initiated_at, responded_at
+└── decline_reason (optional)
+
+ChatThread
+├── id, patient_id
+├── thread_type [patient_care_team | doctor_internal_consult]
+├── title
+├── created_at, updated_at
+└── last_message_at
+
+ChatMessage
+├── id, thread_id, sender_id (user_id)
+├── sender_role [patient | caregiver | primary_doctor | co_managing_doctor | consulting_doctor | system]
+├── message_type [text | voice_note | attachment | clinical_event_card]
+├── content (text body or transcribed voice note)
+├── voice_note_url, voice_duration_seconds
+├── linked_follow_up_row_id (optional FK)
+├── linked_dose_change_id (optional FK)
+├── urgency_flag [routine | symptom_concern]
+├── read_by_user_ids[]
+└── sent_at
+
+ChatAttachment
+├── id, message_id
+├── file_url, file_type [image | pdf | audio]
+├── file_name, file_size_bytes
+└── uploaded_at
+
+FollowUpRow
+├── id, patient_id, pp_date, status [draft | pending | reviewed]
+├── lab_values { hb, tlc, plt, afp, inr, ptt, bilirubin_total, bilirubin_direct, sgot, sgpt, alk_phos, ggt, albumin, na_k, urea, creatinine, hba1c }
+├── drug_levels { tac_level, evo_level }
+├── patient_reported_doses { neoral_tac, everolimus, aza_mpa, pred }
+├── doctor_prescribed_doses { neoral_tac, everolimus, aza_mpa, pred }
+├── wt, comments, attachments[]
+├── submitted_at, reviewed_at
+└── reviewed_by (doctor_id)
+
+DoseChange
+├── follow_up_row_id, field_name, old_value, new_value
+├── changed_by (doctor_id), changed_at, reason
+
+DoctorResponse
+├── follow_up_row_id, doctor_id, additional_tests[], additional_medications, clinical_notes, sent_at
+
+User
+├── id, role [patient | caregiver | doctor | admin]
+├── display_name, email, phone, medical_license_number (for doctors), profile_photo_url
+└── status [active | disabled]
+</div></code></pre>
+<hr>
+<h2 id="10-uiux-requirements">10. UI/UX Requirements</h2>
+<h3 id="101-chat-interface-design">10.1 Chat Interface Design</h3>
+<ul>
+<li><strong>Patient view</strong>: Clean 1:1 style messaging UI showing messages from all care team members with clear doctor name &amp; avatar labels. Dedicated voice record button and file upload clip.</li>
+<li><strong>Doctor view</strong>: Integrated chat sidebar or tab next to patient chart. Includes filter for &quot;Internal Doctor Notes&quot; vs &quot;Patient Chat&quot;. System event cards rendered in distinct neutral style.</li>
+</ul>
+<h3 id="102-care-team--authorization-ui">10.2 Care Team &amp; Authorization UI</h3>
+<ul>
+<li><strong>Care Team Panel</strong>: Modal/tab on patient chart displaying Primary Doctor and authorized co-managing/consulting doctors.</li>
+<li><strong>Add Doctor Dialog</strong>: Doctor lookup search, role radio buttons (<code>Co-Managing</code> vs <code>Consulting View-Only</code>), optional expiration picker.</li>
+</ul>
+<h3 id="103-case-transfer-dialog">10.3 Case Transfer Dialog</h3>
+<ul>
+<li><strong>Transfer Form</strong>: Target doctor selector, handoff note text box, checkbox to keep outgoing doctor as co-managing or remove access.</li>
+<li><strong>Transfer Banner</strong>: Incoming doctor sees prominent acceptance banner on dashboard: <em>&quot;Pending Case Transfer: Raghavendra S. Dyk from Dr. Rajesh Dey. [Review Handoff &amp; Accept]&quot;</em>.</li>
+</ul>
+<hr>
+<h2 id="11-non-functional-requirements">11. Non-Functional Requirements</h2>
+<p><em>(Retained from previous spec, with addition of HIPAA/PHI compliant encrypted chat message storage and web socket real-time messaging latency &lt; 1s).</em></p>
+<hr>
+<h2 id="12-authentication--authorization">12. Authentication &amp; Authorization</h2>
+<h3 id="1210-granular-authorization-matrix">12.10 Granular Authorization Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>User Role</th>
+<th>View Chart History</th>
+<th>Enter Patient Labs/Doses</th>
+<th>Prescribe/Adjust Doses</th>
+<th>Send Patient Chat</th>
+<th>Post Doctor Internal Notes</th>
+<th>Authorize Secondary Doctor</th>
+<th>Transfer Case Ownership</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Patient / Caregiver</strong></td>
+<td>Own chart only</td>
+<td>Yes (New row)</td>
+<td>No</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Primary Doctor</strong></td>
+<td>Full</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Co-Managing Doctor</strong></td>
+<td>Full</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Consulting Doctor</strong></td>
+<td>Full</td>
+<td>No</td>
+<td>No</td>
+<td>Read-only</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Transferred Doctor</strong></td>
+<td>Historical only</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Read-only</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Admin</strong></td>
+<td>Full (Audit)</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes (Force)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="1314-security-compliance--scope">13–14. Security, Compliance &amp; Scope</h2>
+<ul>
+<li>Phase 1 (MVP) includes: 1:1 Patient-Care Team Chat, Primary Doctor Authorization Grants, Primary Case Transfer, and Tabular Flowchart.</li>
+<li>Phase 2 includes: Voice Notes, Doctor-to-Doctor Internal Consult Thread, and Automated Audio Transcription.</li>
+</ul>
+<hr>
+<h2 id="15-sample-screen-inventory">15. Sample Screen Inventory</h2>
+<table>
+<thead>
+<tr>
+<th>Screen</th>
+<th>User</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>My Chat</td>
+<td>Patient</td>
+<td>Message care team, record voice notes, send photos</td>
+</tr>
+<tr>
+<td>Patient Care Team</td>
+<td>Patient</td>
+<td>View primary doctor and authorized consulting doctors</td>
+</tr>
+<tr>
+<td>Doctor Chat Hub</td>
+<td>Doctor</td>
+<td>View patient chat, send voice notes, view system event posts</td>
+</tr>
+<tr>
+<td>Internal Consult Thread</td>
+<td>Doctor</td>
+<td>Private doctor-to-doctor discussion for complex cases</td>
+</tr>
+<tr>
+<td>Care Team Management</td>
+<td>Doctor, Admin</td>
+<td>Invite secondary doctors, assign access roles, revoke access</td>
+</tr>
+<tr>
+<td>Case Transfer Modal</td>
+<td>Doctor, Admin</td>
+<td>Select incoming doctor, assign access roles, execute transfer</td>
+</tr>
+<tr>
+<td>Transfer Review Banner</td>
+<td>Doctor</td>
+<td>Incoming doctor accepts/declines pending case transfer</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="16-mock-screens">16. Mock Screens</h2>
+<h3 id="1616-patient--conversational-chat">16.16 Patient — Conversational Chat</h3>
+<p><strong>Route:</strong> <code>/patient/chat</code></p>
+<pre class="hljs"><code><div>┌─────────────────────────────────────┐
+│  ← Back         Care Team Chat  👤  │
+├─────────────────────────────────────┤
+│ ℹ Non-urgent chat. In emergency call│
+│   112 / visit local hospital.       │
+├─────────────────────────────────────┤
+│                                     │
+│  [16 Aug, 10:45 AM]                 │
+│  ┌─────────────────────────────┐    │
+│  │ System: Follow-up submitted │    │
+│  │ for 16/08/2026.             │    │
+│  └─────────────────────────────┘    │
+│                                     │
+│  ┌─────────────────────────────┐    │
+│  │ Dr. Rajesh Dey      9:15 AM │    │
+│  │ Tac level looks good. I have│    │
+│  │ reduced Aza evening dose.   │    │
+│  └─────────────────────────────┘    │
+│                                     │
+│ ┌─────────────────────────────┐     │
+│ │ You                 10:30 AM│     │
+│ │ Thank you doctor. Should we │     │
+│ │ continue Prednisolone at 5mg│     │
+│ │ photo attached.             │     │
+│ │ 📷 rash_photo.jpg           │     │
+│ └─────────────────────────────┘     │
+│                                     │
+│ ┌─────────────────────────────┐     │
+│ │ Dr. Tejai B (Co-Managing)   │     │
+│ │ 🔊 Voice Note (0:24) ▶ ━━━━ │     │
+│ │ &quot;Yes, continue Pred 5mg...&quot; │     │
+│ └─────────────────────────────┘     │
+│                                     │
+├─────────────────────────────────────┤
+│ 🎙 📎 [ Type message...         ] ➔ │
+└─────────────────────────────────────┘
+</div></code></pre>
+<h3 id="1617-doctor--integrated-chat--consult-view">16.17 Doctor — Integrated Chat &amp; Consult View</h3>
+<p><strong>Route:</strong> <code>/doctor/patients/:id/chat</code></p>
+<pre class="hljs"><code><div>┌─────────────────────────────────────────────────────────────────────────────┐
+│ Raghavendra S. Dyk · Chat Hub                                              │
+├───────────────────────────────────────┬─────────────────────────────────────┤
+│ PATIENT &amp; CARE TEAM CHAT              │ DOCTOR INTERNAL CONSULT (Private)   │
+│                                       │                                     │
+│ [ System ] 16 Aug 10:45 AM            │ Dr. Rajesh Dey (16 Aug 11:00 AM):   │
+│ Lab submission received for 16/08/26  │ @Dr.Barun could you review kidney   │
+│                                       │ function trends? Creatinine is 0.9. │
+│ Patient (16 Aug 10:30 AM):            │                                     │
+│ &quot;Should we continue Prednisolone?&quot;    │ Dr. Barun (Nephrology Consult):     │
+│ 📷 rash_photo.jpg [View]              │ &quot;Creatinine is fine for age. No    │
+│                                       │ adjustment needed for now.&quot;         │
+│ Dr. Tejai B (16 Aug 11:15 AM):        │                                     │
+│ 🔊 Voice note (0:24) [Play]           │                                     │
+│                                       │                                     │
+├───────────────────────────────────────┼─────────────────────────────────────┤
+│ 🎙 📎 [ Reply to patient...    ] ➔    │ [ Add internal clinical note... ] ➔ │
+└───────────────────────────────────────┴─────────────────────────────────────┘
+</div></code></pre>
+<h3 id="1618-doctor--care-team-management--authorization-modal">16.18 Doctor — Care Team Management &amp; Authorization Modal</h3>
+<p><strong>Route:</strong> <code>/doctor/patients/:id/care-team</code></p>
+<pre class="hljs"><code><div>┌──────────────────────────────────────────────────────────────────┐
+│ Manage Care Team · Raghavendra S. Dyk                            │
+├──────────────────────────────────────────────────────────────────┤
+│ CURRENT CARE TEAM                                                │
+│ • Dr. Rajesh Dey         Primary Doctor      [ Owner ]           │
+│ • Dr. Tejai B            Co-Managing         [ Edit ] [ Revoke ] │
+│ • Dr. Barun              Consulting (View)   [ Edit ] [ Revoke ] │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│ AUTHORIZE NEW DOCTOR                                             │
+│ Select Doctor:  [ Dr. Ananya Sharma (Pediatric Nephrology)  ▼ ] │
+│                                                                  │
+│ Access Level:   ( ) Co-Managing (Can prescribe &amp; chat)           │
+│                 (•) Consulting View-Only (Read chart + notes)   │
+│                                                                  │
+│ Access Duration: [ 14 Days (Temporary Consult)               ▼ ] │
+│                                                                  │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │                  Grant Authorization                         │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+</div></code></pre>
+<h3 id="1619-doctor--patient-case-transfer-modal">16.19 Doctor — Patient Case Transfer Modal</h3>
+<p><strong>Route:</strong> <code>/doctor/patients/:id/transfer</code></p>
+<pre class="hljs"><code><div>┌──────────────────────────────────────────────────────────────────┐
+│ Transfer Primary Ownership · Raghavendra S. Dyk                  │
+├──────────────────────────────────────────────────────────────────┤
+│ Current Primary: Dr. Rajesh Dey                                  │
+│                                                                  │
+│ Select New Primary Doctor:                                       │
+│ [ Dr. Tejai B (Transplant Surgery)                           ▼ ] │
+│                                                                  │
+│ Handoff Summary &amp; Clinical Status (Required):                    │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │ Patient is 3 months post liver transplant. Tac level stable  │ │
+│ │ at 8.1. Aza dose reduced. Transferring primary ownership as  │ │
+│ │ Dr. Tejai B takes over post-op clinic rotations.             │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│ Outgoing Doctor Access:                                          │
+│ [X] Retain Dr. Rajesh Dey as Co-Managing Doctor                  │
+│ [ ] Transition Dr. Rajesh Dey to Historical Read-Only            │
+│                                                                  │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │             Initiate Primary Ownership Transfer              │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+</div></code></pre>
+<hr>
+<h2 id="17-open-questions-for-stakeholders">17. Open Questions for Stakeholders</h2>
+<ol>
+<li><strong>Dose notation:</strong> What exactly does <code>4/4</code> mean for Neoral/Tac — AM/PM, brand split, or mg split? Document canonical format.</li>
+<li><strong>Column set:</strong> Is the column list fixed for all patients, or configurable by diagnosis/protocol?</li>
+<li><strong>Immunosuppression regimen:</strong> Which patients use Everolimus dose + EVO level vs Neoral/Tac + Tac level only? Are both ever required on the same row?</li>
+<li><strong>Who can submit:</strong> Patient directly, caregiver only, or clinic staff on behalf of patient?</li>
+<li><strong>WhatsApp templates:</strong> Which pre-approved WhatsApp message templates are required by the clinic's API provider?</li>
+<li><strong>Legal/regulatory:</strong> Is this clinic-operated software or a regulated medical device in your jurisdiction?</li>
+<li><strong>Emergency handling:</strong> Should the app include escalation if critical lab values are entered?</li>
+<li><strong>Multi-language:</strong> Hindi/regional language support needed?</li>
+<li><strong>SMS provider:</strong> Which SMS gateway will be used for OTP delivery in production (MSG91, Twilio, etc.)?</li>
+<li><strong>Doctor onboarding:</strong> Should doctors self-register via Google/X/Facebook, or admin-provision only?</li>
+<li><strong>WhatsApp provider:</strong> Which WhatsApp Business API partner will be used (Meta Cloud API, Gupshup, etc.)?</li>
+<li><strong>Default protocol:</strong> What are the standard post-op checkpoint days and follow-up interval for this clinic (e.g., 7/14/30/90 days)?</li>
+<li><strong>Overdue escalation:</strong> Should the assigned doctor be notified automatically when a patient misses a milestone?</li>
+<li><strong>Voice Note Duration Limit</strong>: Should voice recording be capped at 60 or 120 seconds to manage bandwidth and storage?</li>
+<li><strong>Transfer Acceptance Policy</strong>: Should primary case transfer take effect immediately upon initiation or require explicit click-to-accept by incoming doctor? (Recommendation: Require acceptance with admin override).</li>
+<li><strong>Emergency Escalation</strong>: Should high urgency chat flags send direct SMS/push alerts to the doctor on duty?</li>
+</ol>
+<hr>
+<h2 id="18-acceptance-criteria-mvp">18. Acceptance Criteria (MVP)</h2>
+<p>The MVP is accepted when:</p>
+<ol>
+<li>A patient can complete and submit a follow-up row that includes all fields defined in §7.2.1 (Hb through Comments).</li>
+<li>A doctor can open the submission, enter prescribed doses, and send a reply with additional test requests.</li>
+<li>The patient receives the doctor's response without using manual email for that transaction.</li>
+<li>Dose changes are visibly distinguished and stored in an audit log.</li>
+<li>The chart can be exported/printed in a layout recognizable to users of the paper form.</li>
+<li>Only authorized users can access a given patient's PHI.</li>
+<li>Users can sign in via <strong>Google OAuth</strong>, <strong>X OAuth</strong>, <strong>Facebook Login</strong>, or <strong>SMS OTP</strong> and reach the correct portal for their role.</li>
+<li>Failed logins, OTP attempts, and sign-outs are recorded in the authentication audit log.</li>
+<li>Milestones are auto-generated from the post-op protocol and rolling follow-up interval.</li>
+<li>Patients receive automated <strong>SMS and/or WhatsApp</strong> reminders before and on milestone due dates, per their preferences.</li>
+<li>Submitting a follow-up cancels pending reminders for that milestone; delivery status is logged for each reminder sent.</li>
+<li>Patient and authorized doctors can exchange real-time text, voice notes, and image attachments in the patient chat thread.</li>
+<li>System automatically posts clinical event cards in the chat whenever lab rows are submitted or dose changes are made.</li>
+<li>Primary doctor can grant co-managing or consulting access to secondary doctors, and patient portal updates the care team display accordingly.</li>
+<li>Primary doctor can initiate a case transfer with a mandatory handoff note, and upon acceptance, primary ownership is updated with complete audit log entries.</li>
+<li>All flowchart entries, dose adjustments, notifications, and milestone reminders operate as specified in Sections 7–16.</li>
+</ol>
+
+</body>
+</html>
