@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Guard Write Operations",
+      "trigger": "PreToolUse",
+      "description": "On writes to source paths (apps/, infra/, DB migrations), reminds the agent of the conventions guardrails. Writes to root config, docs, and .kiro/ pass silently.",
+      "matcher": "fs_write|str_replace|fs_append",
+      "action": {
+        "type": "command",
+        "command": "INPUT=$(cat); TARGET=$(printf '%s' \"$INPUT\" | grep -oE '\"(path|targetFile)\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -n1 | sed -E 's/.*:[[:space:]]*\"([^\"]*)\"/\\1/'); case \"$TARGET\" in */apps/*|apps/*|*/infra/*|infra/*|*migrations/*|*migration/*) echo \"Guardrails (.kiro/steering/conventions.md): stay within the work package's declared paths; no PHI in logs or notification bodies; parameterized SQL only; keep immutable records (chat, dose history, authorizations, transfers) append-only; never edit an applied migration (add a new one); no hardcoded secrets or brand name. apps/ = app code; infra/ = Infra agent only.\";; *) : ;; esac; exit 0"
+      }
+    }
+  ]
+}

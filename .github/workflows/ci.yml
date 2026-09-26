@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Lint, Test, Build, Synth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # App workspaces are a hard gate; their builds pass today.
+      - name: Build (apps)
+        run: |
+          npm run build --workspace @postopcare/api
+          npm run build --workspace @postopcare/web
+
+      # WP 0.3 carry-over: the infra package was authored but never successfully
+      # compiled/synthesized. Its `tsc` build (pre-existing type errors, e.g.
+      # MessagingStack.milestoneDlq) and `cdk synth` (Networking<->Database
+      # dependency cycle) are not yet clean. Keep infra non-blocking until WP 0.3
+      # lands, then remove continue-on-error to make these required gates.
+      # TODO(WP 0.3): flip both infra steps to required once build + synth are clean.
+      - name: Build (infra, non-blocking until WP 0.3)
+        run: npm run build --workspace infra
+        continue-on-error: true
+
+      - name: Infra synth (non-blocking until WP 0.3)
+        run: npm run synth
+        continue-on-error: true

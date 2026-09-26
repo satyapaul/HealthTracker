@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  cfn-03-redis — PostOp Care Platform
+  ElastiCache Serverless Redis layer (sessions, OTP cache, rate-limit counters,
+  WebSocket connection registry).
+  Depends on: cfn-01-networking (VPC, private subnets, Redis security group).
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    Description: Deployment environment (dev | staging | prod)
+    AllowedValues: [dev, staging, prod]
+    Default: dev
+
+  ProjectName:
+    Type: String
+    Description: Short project identifier used in resource names and tags
+    Default: postopcare
+
+  NetworkingStackName:
+    Type: String
+    Description: >
+      Exact name of the cfn-01-networking CloudFormation stack whose
+      Outputs supply VPC, subnet, and security-group references.
+    Default: postopcare-networking
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+
+  # IsProduction gates tighter snapshot retention and alarm thresholds.
+  # Non-production stacks still get 7-day snapshots (cost-conscious default).
+  IsProduction: !Equals [!Ref EnvironmentName, prod]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # 1. KMS Customer Managed Key — Redis encryption at rest
+  # =========================================================================
+
+  # A dedicated CMK gives the team key-level audit trails in CloudTrail,
+  # independent revocation capability, and satisfies PHI-at-rest controls
+  # under DPDP Act / healthcare data governance.
+  RedisKMSKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain          # Never auto-delete a key that protected PHI
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub "${ProjectName}-${EnvironmentName} — ElastiCache Redis CMK"
+      # Enable yearly automatic key rotation (AWS rotates the backing key
+      # material; all references to this key ARN continue working).
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Sub "${ProjectName}-${EnvironmentName}-redis-key-policy"
+        Statement:
+
+          # Allow the AWS account root full control so the key is never
+          # permanently locked out if IAM roles are deleted.
+          - Sid: EnableRootAccountAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+          # ElastiCache service needs GenerateDataKey + Decrypt to handle
+          # data-key envelope encryption for the serverless cache.
+          - Sid: AllowElastiCacheService
+            Effect: Allow
+            Principal:
+              Service: elasticache.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: "*"
+
+          # CloudWatch and CloudTrail may also need DescribeKey for metric
+          # and log encryption cross-service usage.
+          - Sid: AllowCloudWatchAndCloudTrail
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudwatch.amazonaws.com
+                - cloudtrail.amazonaws.com
+            Action:
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Stack
+          Value: cfn-03-redis
+
+  # Human-readable alias for console navigation and easier cross-stack referencing.
+  RedisKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      # alias/ prefix is required by CloudFormation; name must be unique per account/region.
+      AliasName: !Sub "alias/${ProjectName}-${EnvironmentName}-redis"
+      TargetKeyId: !Ref RedisKMSKey
+
+  # =========================================================================
+  # 2. ElastiCache Serverless Cache
+  # =========================================================================
+
+  # ElastiCache Serverless (GA 2023) eliminates cluster sizing, node-type
+  # selection, and shard management. Capacity scales automatically within the
+  # CacheUsageLimits ceiling defined below.
+  #
+  # Usage in this platform:
+  #   • Auth session JWTs      — TTL 30 days
+  #   • OTP hashes (bcrypt)    — TTL 5 minutes
+  #   • Rate-limit counters    — TTL per window
+  #   • WebSocket connectionId — TTL managed by Lambda
+  #   • Short-lived app caches — configurable TTL
+  PostOpRedisCache:
+    Type: AWS::ElastiCache::ServerlessCache
+    Properties:
+      # Name must be unique within the account/region; lowercase alphanumeric + hyphens only.
+      ServerlessCacheName: !Sub "${ProjectName}-${EnvironmentName}-redis"
+
+      # Engine & version
+      Engine: redis
+      # MajorEngineVersion pins to Redis 7.x; patch versions managed by AWS.
+      MajorEngineVersion: "7"
+
+      # ---------- Capacity limits ----------
+      # These are soft ceilings; actual usage is billed per GB-hour and ECPUs consumed.
+      # Adjust upward if sustained load exceeds limits (CloudWatch alarm below will alert).
+      CacheUsageLimits:
+        DataStorage:
+          Maximum: 5       # GB — sufficient for clinic-scale sessions + OTP + counters
+          Unit: GB
+        ECPUPerSecond:
+          Maximum: 5000    # ElastiCache Processing Units/s — ~5k req/s headroom
+
+      # ---------- Encryption ----------
+      # Transit encryption (TLS 1.2+) is mandatory; all app Lambdas connect with rediss://
+      TransitEncryptionEnabled: true
+      # At-rest encryption via the CMK created above.
+      KmsKeyId: !GetAtt RedisKMSKey.Arn
+
+      # ---------- Backup / snapshot ----------
+      # SnapshotRetentionLimit: 7 days in all environments.
+      # Snapshots are taken daily at DailySnapshotTime (02:00 UTC = 07:30 IST).
+      SnapshotRetentionLimit: 7
+      DailySnapshotTime: "02:00"   # UTC; 02:00 UTC = 07:30 IST (low-traffic window)
+
+      # ---------- Network placement ----------
+      # Redis lives in the private subnets (no internet route) so only
+      # VPC-attached Lambdas and Fargate tasks can reach port 6379.
+      SubnetIds:
+        - Fn::ImportValue: !Sub "${NetworkingStackName}-PrivateSubnet1Id"
+        - Fn::ImportValue: !Sub "${NetworkingStackName}-PrivateSubnet2Id"
+
+      # The Redis security group (imported from networking stack) allows
+      # inbound TCP 6379 exclusively from the Lambda/application security group.
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub "${NetworkingStackName}-RedisSGId"
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Stack
+          Value: cfn-03-redis
+        # Data classification tag for PHI governance and cost allocation.
+        - Key: DataClassification
+          Value: PHI-adjacent    # Contains session tokens and OTP hashes; treat as sensitive
+
+  # =========================================================================
+  # 3. CloudWatch Alarms — operational visibility
+  # =========================================================================
+
+  # Alert when ElastiCache data storage approaches the 5 GB hard limit.
+  # Fires at 80 % (4 GB) so there is time to raise the limit before throttling.
+  RedisStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-redis-storage-high"
+      AlarmDescription: >
+        ElastiCache Redis data storage exceeds 80% of the 5 GB ceiling.
+        Raise CacheUsageLimits.DataStorage.Maximum or investigate key eviction.
+      Namespace: AWS/ElastiCache
+      MetricName: BytesUsedForCache
+      Dimensions:
+        - Name: ServerlessCacheName
+          Value: !Ref PostOpRedisCache
+      Statistic: Maximum
+      Period: 300            # 5-minute evaluation period
+      EvaluationPeriods: 2   # Alarm after 2 consecutive breaches (10 min)
+      Threshold: 4294967296  # 4 GB in bytes (80% of 5 GB)
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  # Alert when ECPU consumption approaches the 5000/s ceiling.
+  # A sustained breach may indicate a hot-key or runaway loop.
+  RedisEcpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-redis-ecpu-high"
+      AlarmDescription: >
+        ElastiCache Redis ECPU/s exceeds 80% of the 5000 limit.
+        Investigate hot keys, command patterns, or raise the ECPUPerSecond limit.
+      Namespace: AWS/ElastiCache
+      MetricName: ElastiCacheProcessingUnits
+      Dimensions:
+        - Name: ServerlessCacheName
+          Value: !Ref PostOpRedisCache
+      Statistic: Maximum
+      Period: 60             # 1-minute granularity for ECPU spikes
+      EvaluationPeriods: 3
+      Threshold: 4000        # 80% of 5000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+
+  # -------------------------------------------------------------------------
+  # Redis connection details — consumed by application Lambda stacks
+  # -------------------------------------------------------------------------
+
+  RedisEndpointAddress:
+    Description: >
+      ElastiCache Serverless Redis endpoint hostname.
+      Application Lambdas connect via rediss://<host>:6379 (TLS required).
+    Value: !GetAtt PostOpRedisCache.Endpoint.Address
+    Export:
+      # Export name convention: <StackName>-RedisEndpointAddress
+      # Consuming stacks reference this via:
+      #   Fn::ImportValue: !Sub "${RedisStackName}-RedisEndpointAddress"
+      Name: !Sub "${AWS::StackName}-RedisEndpointAddress"
+
+  RedisEndpointPort:
+    Description: >
+      ElastiCache Serverless Redis endpoint port (always 6379 for Redis).
+    Value: !GetAtt PostOpRedisCache.Endpoint.Port
+    Export:
+      Name: !Sub "${AWS::StackName}-RedisEndpointPort"
+
+  RedisKMSKeyArn:
+    Description: >
+      ARN of the KMS CMK used for Redis at-rest encryption.
+      Grant this key to any IAM role that needs to perform kms:Decrypt
+      on Redis-encrypted data (e.g., backup restore operations).
+    Value: !GetAtt RedisKMSKey.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RedisKMSKeyArn"
+
+  # -------------------------------------------------------------------------
+  # Convenience outputs for console / debugging (not critical cross-stack)
+  # -------------------------------------------------------------------------
+
+  RedisCacheName:
+    Description: Logical name of the ElastiCache Serverless cache resource.
+    Value: !Ref PostOpRedisCache
+    Export:
+      Name: !Sub "${AWS::StackName}-RedisCacheName"
+
+  RedisKMSKeyAlias:
+    Description: Human-readable KMS key alias (visible in AWS Console / CloudTrail).
+    Value: !Ref RedisKMSKeyAlias
+    # Not exported — informational only; callers should use RedisKMSKeyArn.

@@ -1,0 +1,640 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  PostOp Care Platform — S3 Storage Layer (cfn-04-storage)
+  ─────────────────────────────────────────────────────────
+  Provisions the KMS Customer Managed Key dedicated to S3 (separate from the
+  RDS/Aurora CMK created in cfn-03-database), three versioned/encrypted S3
+  buckets (Lab Reports, Exports, Assets), bucket-level policies, lifecycle
+  rules, an SNS topic for virus-scan fan-out, and S3 event notifications.
+
+  Dependency order:
+    cfn-01-network → cfn-02-security → cfn-03-database → cfn-04-storage (this)
+
+  Region: ap-south-1 (Mumbai)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ──────────────────────────────────────────────────────────────────────────────
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+    Description: >
+      Logical environment name. Used as a suffix on every resource so that dev,
+      staging, and prod stacks can coexist in the same AWS account.
+
+  ProjectName:
+    Type: String
+    Default: postopcare
+    Description: >
+      Short project identifier. Used in resource names, tags, and export keys.
+
+  AccountId:
+    Type: String
+    Description: >
+      The 12-digit AWS account ID. Passed explicitly rather than using
+      AWS::AccountId so bucket names can be computed before stack creation and
+      referenced from other stacks without cross-stack Ref loops.
+    AllowedPattern: "^[0-9]{12}$"
+    ConstraintDescription: Must be exactly 12 digits.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Metadata — parameter grouping for the AWS Console wizard
+# ──────────────────────────────────────────────────────────────────────────────
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Environment" }
+        Parameters: [EnvironmentName, ProjectName, AccountId]
+    ParameterLabels:
+      EnvironmentName: { default: "Environment (dev / staging / prod)" }
+      ProjectName:     { default: "Project identifier" }
+      AccountId:       { default: "AWS Account ID (12 digits)" }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ============================================================================
+  # 1.  KMS Customer Managed Key — S3 encryption
+  #     Kept deliberately separate from the DB CMK so that a Key Policy change
+  #     affecting DB access never inadvertently affects file storage, and so
+  #     CloudTrail decryption events can be filtered by key independently.
+  # ============================================================================
+  S3KMSKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain          # Retain on stack delete to avoid data loss
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub >
+        ${ProjectName} S3 CMK — SSE-KMS for Lab Reports, Exports, and Assets
+        buckets in environment ${EnvironmentName}
+      EnableKeyRotation: true        # Annual automatic key material rotation
+      MultiRegion: false             # Single-region; data residency = ap-south-1
+      KeySpec: SYMMETRIC_DEFAULT     # AES-256-GCM — the only spec valid for SSE
+      KeyUsage: ENCRYPT_DECRYPT
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+
+          # Allow the owning account full administrative control via IAM policies.
+          # Without this statement the key becomes unmanageable if the admin role
+          # is ever accidentally removed from the direct key policy.
+          - Sid: RootAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+          # S3 service principal needs GenerateDataKey + Decrypt for SSE-KMS.
+          # Scoped to this account so a cross-account S3 request cannot use the key.
+          - Sid: S3ServiceEncryptionDecryption
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+          # SNS needs GenerateDataKey + Decrypt to publish encrypted messages.
+          - Sid: SNSServiceEncryptionDecryption
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: S3-SSE-KMS
+
+  # Human-friendly alias so the key is identifiable in the KMS console without
+  # looking up the key ID.
+  S3KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-s3-${EnvironmentName}"
+      TargetKeyId: !Ref S3KMSKey
+
+  # ============================================================================
+  # 2.  SNS Topic — Virus Scan fan-out
+  #     S3 publishes a notification here on every PUT to the Lab Reports bucket.
+  #     The virus-scan Lambda subscribes to this topic (subscription created in
+  #     cfn-06-lambdas to avoid circular dependencies with the Lambda ARN).
+  #     Topic is KMS-encrypted using the S3 CMK.
+  # ============================================================================
+  VirusScanTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-virus-scan-${EnvironmentName}"
+      DisplayName: !Sub "PostOp Care — Virus Scan Trigger (${EnvironmentName})"
+      # Encrypt topic messages at rest with the S3 CMK.
+      KmsMasterKeyId: !Ref S3KMSKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: VirusScanTrigger
+
+  # SNS Topic Policy — allow S3 to publish on PUT events from the Lab Reports
+  # bucket.  The aws:SourceArn condition pins the publisher to exactly that
+  # bucket so no other S3 bucket can publish to this topic.
+  VirusScanTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref VirusScanTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3LabReportsBucketPublish
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref VirusScanTopic
+            Condition:
+              ArnLike:
+                # The bucket name is deterministic so we can build the ARN here.
+                aws:SourceArn: !Sub
+                  - "arn:aws:s3:::${BucketName}"
+                  - BucketName: !Sub "${ProjectName}-lab-reports-${AccountId}-${EnvironmentName}"
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  # ============================================================================
+  # 3.  LAB REPORTS BUCKET
+  #     Stores patient-uploaded lab PDFs and DICOM images.
+  #     Retention: 7 years (HIPAA-equivalent; follows Indian Digital Information
+  #     Security in Healthcare Act draft guidance for medical records).
+  #     Access: private only; application issues 15-min presigned URLs.
+  # ============================================================================
+  LabReportsBucket:
+    Type: AWS::S3::Bucket
+    # DependsOn ensures the SNS Topic Policy is in place before S3 attempts to
+    # configure the event notification — otherwise S3 will reject the config
+    # because it cannot verify publish permission.
+    DependsOn: VirusScanTopicPolicy
+    DeletionPolicy: Retain          # Never delete PHI data on stack teardown
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-lab-reports-${AccountId}-${EnvironmentName}"
+
+      # ── Encryption ──────────────────────────────────────────────────────────
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt S3KMSKey.Arn
+            # BucketKeyEnabled reduces KMS API call costs by generating one
+            # data key per object upload rather than one per S3 API call.
+            BucketKeyEnabled: true
+
+      # ── Versioning ──────────────────────────────────────────────────────────
+      # Required for MFA Delete eligibility and point-in-time restore of PHI.
+      VersioningConfiguration:
+        Status: Enabled
+
+      # ── Ownership ───────────────────────────────────────────────────────────
+      # BucketOwnerEnforced disables ACLs entirely; only bucket policies and IAM
+      # policies control access.  Recommended for all new buckets (AWS default
+      # since April 2023 for new accounts).
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      # ── Public Access Block ──────────────────────────────────────────────────
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      # ── CORS ────────────────────────────────────────────────────────────────
+      # The React SPA uploads directly to S3 via presigned URLs (PUT) and
+      # downloads via presigned GET.  AllowedOrigins is intentionally broad
+      # (https://*.postopcare.in) so subdomains (app, admin, doctor) all work;
+      # tighten to exact origins if CORS policy requires it.
+      CorsConfiguration:
+        CorsRules:
+          - Id: PresignedUploadDownload
+            AllowedMethods:
+              - PUT    # presigned upload from browser
+              - GET    # presigned download for viewing/downloading report
+            AllowedOrigins:
+              - "https://*.postopcare.in"
+            AllowedHeaders:
+              - "*"   # Content-Type, Content-MD5, x-amz-* headers needed for upload
+            ExposedHeaders:
+              - ETag  # Needed by multipart upload completion
+            MaxAge: 3000  # 50 minutes; browser caches preflight result
+
+      # ── Lifecycle Rules ──────────────────────────────────────────────────────
+      # Medical records lifecycle:
+      #   0–90 days   : STANDARD (frequent access; recently uploaded reports)
+      #   90–365 days : STANDARD_IA (infrequent; older reports still searchable)
+      #   365–2555    : GLACIER  (archival; regulatory hold)
+      #   > 2555 days : Expire  (7 years = 2555 days)
+      #
+      # Non-current versions are cleaned up after 90 days to bound storage cost
+      # while still allowing a 90-day restore window.
+      LifecycleConfiguration:
+        Rules:
+          - Id: LabReportsRetentionAndTiering
+            Status: Enabled
+            # Apply to all objects (no prefix/tag filter)
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+            ExpirationInDays: 2555    # 7 × 365 = 2555 days
+
+          - Id: NonCurrentVersionCleanup
+            Status: Enabled
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            NoncurrentVersionExpirationInDays: 365  # Remove old versions after 1 year
+
+          # Delete incomplete multipart uploads to avoid orphaned storage charges.
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+      # ── S3 Event Notifications ───────────────────────────────────────────────
+      # On every new object PUT, notify the virus-scan SNS topic.
+      # The virus-scan Lambda subscription is added in cfn-06-lambdas.
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Event: "s3:ObjectCreated:Put"
+            Topic: !Ref VirusScanTopic
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: DataClassification
+          Value: PHI
+        - Key: RetentionYears
+          Value: "7"
+
+  # ── Lab Reports Bucket Policy ─────────────────────────────────────────────
+  # Two statements:
+  #   1. Deny any request that does not use HTTPS (aws:SecureTransport = false).
+  #   2. Deny PutObject requests that do not specify SSE-KMS encryption, so
+  #      no object can ever be stored without encryption — defence-in-depth.
+  LabReportsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LabReportsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+
+          - Sid: DenyNonHTTPS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt LabReportsBucket.Arn
+              - !Sub "${LabReportsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+          # Deny any put that does not use SSE-KMS — prevents unencrypted uploads
+          # even if a caller tries to bypass the default encryption setting.
+          - Sid: DenyNonKMSEncryptedPuts
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${LabReportsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: "aws:kms"
+
+  # ============================================================================
+  # 4.  EXPORTS BUCKET
+  #     Holds doctor/patient PDF chart exports generated on-demand.
+  #     Transient: objects expire after 1 day.  Versioning off (no reason to
+  #     retain old versions of a throwaway export file).
+  # ============================================================================
+  ExportsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete          # Safe to delete; data is regenerable
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "${ProjectName}-exports-${AccountId}-${EnvironmentName}"
+
+      # ── Encryption ──────────────────────────────────────────────────────────
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt S3KMSKey.Arn
+            BucketKeyEnabled: true
+
+      # ── Versioning ──────────────────────────────────────────────────────────
+      # Deliberately disabled — exports are ephemeral and version history adds
+      # no value while increasing storage cost.
+      VersioningConfiguration:
+        Status: Suspended
+
+      # ── Ownership ───────────────────────────────────────────────────────────
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      # ── Public Access Block ──────────────────────────────────────────────────
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      # ── Lifecycle Rules ──────────────────────────────────────────────────────
+      # Exports are short-lived: expire after 1 day so the bucket self-cleans.
+      # No tiering needed given the 1-day TTL.
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExportExpireAfter1Day
+            Status: Enabled
+            ExpirationInDays: 1
+
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: DataClassification
+          Value: Confidential
+        - Key: RetentionDays
+          Value: "1"
+
+  # ── Exports Bucket Policy ─────────────────────────────────────────────────
+  ExportsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ExportsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+
+          - Sid: DenyNonHTTPS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ExportsBucket.Arn
+              - !Sub "${ExportsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+          - Sid: DenyNonKMSEncryptedPuts
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${ExportsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: "aws:kms"
+
+  # ============================================================================
+  # 5.  ASSETS BUCKET
+  #     Stores patient profile photos and static application assets.
+  #     Served exclusively through a CloudFront distribution using Origin Access
+  #     Control (OAC) — the bucket itself is never directly accessible.
+  #
+  #     The bucket policy grants CloudFront's service principal access scoped to
+  #     this specific distribution ARN.  The CloudFront distribution ARN is
+  #     available only after cfn-05-cloudfront is deployed; we reference it here
+  #     via a parameter or accept that the policy initially allows any CloudFront
+  #     distribution in the account and tighten it post-deploy.
+  #
+  #     Production pattern used here:
+  #       - Allow cloudfront.amazonaws.com with aws:SourceArn condition pointing
+  #         to the distribution.  The distribution ARN is exported from
+  #         cfn-05-cloudfront and is NOT available at this stack's create time
+  #         for a clean sequential deploy.
+  #       - As a safe interim, the policy allows the CloudFront service principal
+  #         scoped to this account.  cfn-05-cloudfront will update this stack
+  #         (or use a separate policy attachment) once the distribution is created.
+  #
+  #     IMPORTANT: Do NOT set s3:PutObject allow for CloudFront — it only needs
+  #     s3:GetObject to serve content.
+  # ============================================================================
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-assets-${AccountId}-${EnvironmentName}"
+
+      # ── Encryption ──────────────────────────────────────────────────────────
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt S3KMSKey.Arn
+            BucketKeyEnabled: true
+
+      # ── Versioning ──────────────────────────────────────────────────────────
+      # Enabled to allow rollback of accidentally overwritten assets.
+      VersioningConfiguration:
+        Status: Enabled
+
+      # ── Ownership ───────────────────────────────────────────────────────────
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      # ── Public Access Block ──────────────────────────────────────────────────
+      # Keep fully private — CloudFront OAC uses IAM signing, not public access.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      # ── Lifecycle Rules ──────────────────────────────────────────────────────
+      # Assets (profile photos, app icons) have indefinite retention on current
+      # version; old non-current versions are cleaned up after 90 days.
+      LifecycleConfiguration:
+        Rules:
+          - Id: AssetsNonCurrentVersionCleanup
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: DataClassification
+          Value: Internal
+        - Key: AccessPattern
+          Value: CloudFront-OAC
+
+  # ── Assets Bucket Policy ──────────────────────────────────────────────────
+  # Statement 1 – DenyNonHTTPS: block any non-TLS request to the bucket.
+  # Statement 2 – AllowCloudFrontOAC: grant CloudFront's service principal
+  #               s3:GetObject scoped to this account.  When cfn-05-cloudfront
+  #               is deployed the distribution ARN can be added as an additional
+  #               aws:SourceArn condition to further restrict to one distribution.
+  # Statement 3 – DenyNonKMSEncryptedPuts: defence-in-depth encryption gate.
+  AssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AssetsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+
+          - Sid: DenyNonHTTPS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AssetsBucket.Arn
+              - !Sub "${AssetsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+          # CloudFront OAC — allow the CloudFront service principal to call
+          # GetObject on this bucket.  aws:SourceAccount prevents cross-account
+          # CloudFront distributions from using this bucket as an origin.
+          # After cfn-05-cloudfront is deployed, add:
+          #   aws:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/<id>"
+          # to further restrict to the exact distribution.
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: "s3:GetObject"
+            Resource: !Sub "${AssetsBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+          - Sid: DenyNonKMSEncryptedPuts
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${AssetsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: "aws:kms"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outputs
+# All outputs are exported so downstream stacks (cfn-05-cloudfront,
+# cfn-06-lambdas, cfn-07-api) can import them without hard-coding ARNs.
+# Export naming convention: {ProjectName}-{LogicalName}-{EnvironmentName}
+# ──────────────────────────────────────────────────────────────────────────────
+Outputs:
+
+  # ── KMS Key ──────────────────────────────────────────────────────────────
+  S3KMSKeyArn:
+    Description: ARN of the S3 Customer Managed Key (CMK)
+    Value: !GetAtt S3KMSKey.Arn
+    Export:
+      Name: !Sub "${ProjectName}-S3KMSKeyArn-${EnvironmentName}"
+
+  S3KMSKeyId:
+    Description: ID of the S3 CMK (useful for CLI operations)
+    Value: !Ref S3KMSKey
+    Export:
+      Name: !Sub "${ProjectName}-S3KMSKeyId-${EnvironmentName}"
+
+  # ── Lab Reports Bucket ────────────────────────────────────────────────────
+  LabReportsBucketName:
+    Description: Name of the Lab Reports S3 bucket
+    Value: !Ref LabReportsBucket
+    Export:
+      Name: !Sub "${ProjectName}-LabReportsBucketName-${EnvironmentName}"
+
+  LabReportsBucketArn:
+    Description: ARN of the Lab Reports S3 bucket
+    Value: !GetAtt LabReportsBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LabReportsBucketArn-${EnvironmentName}"
+
+  # ── Exports Bucket ────────────────────────────────────────────────────────
+  ExportsBucketName:
+    Description: Name of the Exports S3 bucket
+    Value: !Ref ExportsBucket
+    Export:
+      Name: !Sub "${ProjectName}-ExportsBucketName-${EnvironmentName}"
+
+  ExportsBucketArn:
+    Description: ARN of the Exports S3 bucket
+    Value: !GetAtt ExportsBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ExportsBucketArn-${EnvironmentName}"
+
+  # ── Assets Bucket ─────────────────────────────────────────────────────────
+  AssetsBucketName:
+    Description: Name of the Assets S3 bucket
+    Value: !Ref AssetsBucket
+    Export:
+      Name: !Sub "${ProjectName}-AssetsBucketName-${EnvironmentName}"
+
+  AssetsBucketArn:
+    Description: ARN of the Assets S3 bucket
+    Value: !GetAtt AssetsBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-AssetsBucketArn-${EnvironmentName}"
+
+  # ── SNS Topic ─────────────────────────────────────────────────────────────
+  VirusScanTopicArn:
+    Description: >
+      ARN of the SNS topic that receives S3 PUT events from the Lab Reports
+      bucket.  The virus-scan Lambda subscription is created in cfn-06-lambdas.
+    Value: !Ref VirusScanTopic
+    Export:
+      Name: !Sub "${ProjectName}-VirusScanTopicArn-${EnvironmentName}"

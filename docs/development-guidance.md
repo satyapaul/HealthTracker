@@ -17,17 +17,17 @@
 
 ## 1. Target Architecture Recap (from HLD/LLD)
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Frontend | React (web) in `apps/web` | Patient, Doctor, Admin portals |
-| API | Node.js 22 on AWS Lambda in `apps/api/functions` | One function domain per folder (auth, patient, dose, followup, notification, milestone, export, websocket, admin, virus-scan) |
-| Shared code | `apps/api/layers/common/nodejs` | Lambda layer for shared utils, db client, auth middleware |
-| Data | PostgreSQL 16 on Aurora Serverless v2 | Row-Level Security enforces per-patient access |
-| Cache/session | Redis (ElastiCache) | Sessions, OTP, hospital-list cache |
-| Storage | S3 | Lab report uploads, chat attachments, voice notes, hospital logos |
-| Messaging | SQS/SNS/EventBridge | Notification pipeline, milestone scheduler |
-| Infra | AWS CDK + CloudFormation in `infra/` | `cfn-01…07` stacks + CDK constructs |
-| Region | ap-south-1 (Mumbai) | PHI data residency |
+| Layer         | Technology                                       | Notes                                                                                                                         |
+| ------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Frontend      | React (web) in `apps/web`                        | Patient, Doctor, Admin portals                                                                                                |
+| API           | Node.js 22 on AWS Lambda in `apps/api/functions` | One function domain per folder (auth, patient, dose, followup, notification, milestone, export, websocket, admin, virus-scan) |
+| Shared code   | `apps/api/layers/common/nodejs`                  | Lambda layer for shared utils, db client, auth middleware                                                                     |
+| Data          | PostgreSQL 16 on Aurora Serverless v2            | Row-Level Security enforces per-patient access                                                                                |
+| Cache/session | Redis (ElastiCache)                              | Sessions, OTP, hospital-list cache                                                                                            |
+| Storage       | S3                                               | Lab report uploads, chat attachments, voice notes, hospital logos                                                             |
+| Messaging     | SQS/SNS/EventBridge                              | Notification pipeline, milestone scheduler                                                                                    |
+| Infra         | AWS CDK + CloudFormation in `infra/`             | `cfn-01…07` stacks + CDK constructs                                                                                           |
+| Region        | ap-south-1 (Mumbai)                              | PHI data residency                                                                                                            |
 
 **Hospital feature (v1.7) additions that thread through every layer:** `hospitals` table, `hospital_doctor_affiliations` table, `engagement_hospital_id` on follow-up rows, hospital picker UI, hospital-filtered dashboard, admin hospital management.
 
@@ -38,60 +38,110 @@
 Each phase ends in an evaluated, demoable milestone. Work packages (WPs) inside a phase can be parallelized across agents where dependencies allow.
 
 ### Phase 0 — Foundations & Guardrails
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 0.1 | Monorepo tooling: workspaces, TypeScript, ESLint, Prettier, Vitest/Jest, commit hooks | — | `npm ci && npm run lint && npm test` green on empty scaffolds |
-| 0.2 | CI pipeline skeleton (build, lint, test, IaC synth) | HLD §4.13 | PR triggers pipeline; red on failure |
-| 0.3 | CDK bootstrap + base network stack (`cfn-01`), secrets, KMS | HLD §4.1, §6 | `cdk synth` clean; `cdk deploy` to sandbox succeeds |
-| 0.4 | DB migration harness (Flyway) + base schema (users, auth) | LLD §1 | Migrations apply to a throwaway Aurora; rollback tested |
+
+| WP  | Objective                                                                             | Spec ref     | DoD                                                           |
+| --- | ------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------- |
+| 0.1 | Monorepo tooling: workspaces, TypeScript, ESLint, Prettier, Vitest/Jest, commit hooks | —            | `npm ci && npm run lint && npm test` green on empty scaffolds |
+| 0.2 | CI pipeline skeleton (build, lint, test, IaC synth)                                   | HLD §4.13    | PR triggers pipeline; red on failure                          |
+| 0.3 | CDK bootstrap + base network stack (`cfn-01`), secrets, KMS                           | HLD §4.1, §6 | `cdk synth` clean; `cdk deploy` to sandbox succeeds           |
+| 0.4 | DB migration harness (Flyway) + base schema (users, auth)                             | LLD §1       | Migrations apply to a throwaway Aurora; rollback tested       |
+
+#### Phase 0 — Status & Carry-Over (as of current work)
+
+Phase 0 tooling is in place and green, and infra fixes made major progress before being paused. WP 0.3's `cdk synth` DoD is **not yet met**: the infra code was authored but had never been successfully synthesized, so making it synth-clean is a larger task than a one-time bootstrap step — treat it as a focused work effort, not a formality. WP 0.3 is currently **PAUSED with substantial progress banked** (see below), not completed.
+
+**WP 0.1 (Monorepo tooling) — DONE.**
+
+- npm-workspaces root (`apps/*` + `infra`), Node 22 pin (`.nvmrc` / `engines`).
+- ESLint flat config + Prettier + Vitest (apps) / Jest (infra).
+- husky + lint-staged pre-commit.
+- `apps/web` and `apps/api` scaffolds with passing tests; `infra` folded in as a workspace member.
+- `npm ci && npm run lint && npm test` are green.
+
+**WP 0.3 (infra `cdk synth` clean) — PAUSED, progress banked. Carry-over for the Infra agent.**
+
+Earlier fixes (all in `infra/`, plus app-side stubs):
+
+- (a) `database-stack.ts` — Aurora `VER_16_4` → `VER_16_3` (pinned aws-cdk-lib 2.155.0 only exposes up to 16.3).
+- (b) `notification-queue.ts` — `messageRetentionPeriod` → `retentionPeriod`.
+- (c) `edge-stack.ts` — CloudFront OAC → OAI (`S3OriginAccessControl` / `S3BucketOrigin` / `Signing` don't exist in 2.155.0; now uses `OriginAccessIdentity` + `S3Origin`), and `computeStack.apiEndpointUrl` → `computeStack.apiUrl`.
+- (d) `postopcare-lambda.ts` — Lambda entry path `../../../../apps/api/functions` → `../../../apps/api/functions` (off-by-one that dropped the repo-root segment).
+- (e) Created 11 placeholder Lambda handler stubs under `apps/api/functions/<domain>/index.ts` — auth, patient, followup, dose, milestone, milestone-evaluator, notification (multi-handler: default + sms/whatsapp/email/inapp), virus-scan, export, admin, websocket. These return `NOT_IMPLEMENTED` / no-op and get replaced in their respective feature phases.
+
+Infra build now CLEAN:
+
+- `npm run build --workspace infra` (`tsc`) exits 0 — the infra TypeScript build is green. This resolves the earlier blocker where the infra `tsc` build failed with pre-existing type errors. Root `npm run lint` and `npm test` are also green.
+
+Cross-stack dependency cycles fixed so far (all pre-existing — the infra had never synthesized):
+
+- **Orphaned duplicate stack** — deleted `infra/lib/stacks/dataops-stack.ts` (no hyphen), which was dead code carrying 6 `tsc` errors (e.g. a reference to `MessagingStack.milestoneDlq`, which does not exist). The app uses the hyphenated `data-ops-stack.ts`. Removing it cleared the infra build.
+- **Networking↔Database SG cycle** — moved the RDS security group into the Database stack (which owns it) with a static `Port.tcp(5432)` ingress from the Lambda SG, instead of attaching a Networking-owned SG to the cluster/proxy (which pulled the Aurora port back into Networking).
+- **Compute→Database secret cycle** — replaced `dbSecret.grantRead(fn)` (which mutated the Database-owned secret with Compute role ARNs) with identity-based IAM policies on each Compute function using the secret ARN string + `kms:Decrypt` on the Aurora key ARN.
+- **Edge↔Storage (cross-region) cycle** — added `crossRegionReferences: true` to the Storage, Compute, and Edge stacks in `bin/app.ts`, and moved the CloudFront Origin Access Identity (OAI) into the Storage stack. The `grantRead`/`grantDecrypt` now happen in Storage (where the bucket + KMS key live); `EdgeStack` consumes `storageStack.assetsOai` for its S3 origin, making the reference one-way (Edge→Storage).
+- **Messaging↔Compute cycle** — moved the EventBridge Scheduler IAM role out of `MessagingStack` into `ComputeStack` (which owns the MilestoneEvaluator Lambda whose ARN the role references, and the `CfnSchedule`s); removed the placeholder role/output from `MessagingStack`.
+
+Remaining blocker before `cdk synth` is clean:
+
+- **DataOps↔Compute cycle (the one remaining).** `DataOpsStack` is mutually referential with `ComputeStack`: it (a) grants its DynamoDB tables + `dynamoKmsKey` to Compute Lambda functions (writing DataOps ARNs into Compute role policies → Compute→DataOps) **and** (b) reads Compute Lambda metrics for CloudWatch alarms/dashboards and depends on Compute (DataOps→Compute). Because both directions are real, this is not a misplaced-grant quick fix — it reflects a stack-layering issue. Recommended fix is to **split DataOps** into: a **Data** stack (DynamoDB tables + KMS) created **before** Compute so Compute depends on it and grants itself access, and an **Observability** stack (alarms/dashboards) created **after** Compute. This is a deliberate architecture decision deferred for a focused effort.
+
+WP 0.3 status = **PAUSED** with the infra build green and 5 cycle classes resolved; `cdk synth` is still red on the single DataOps↔Compute layering cycle above.
+
+CI (WP 0.2) keeps **both** the infra `build` step and the infra `synth` step non-blocking (`continue-on-error`) until the DataOps↔Compute cycle is resolved and `cdk synth` is clean, at which point both should be flipped to required gates.
 
 ### Phase 1 — Auth & Identity
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 1.1 | Auth Lambda: Google OAuth, X OAuth, SMS OTP, JWT sessions in Redis | SPEC §12, HLD §4.3 | All three sign-in methods reach correct portal; audit rows written |
-| 1.2 | JWT authorizer + role claims on API Gateway | HLD §4.4, §6 | Expired/revoked sessions rejected pre-Lambda |
-| 1.3 | RLS policies + session variables (`app.user_id`, `app.role`, `app.patient_id`) | HLD §4.5 | Cross-patient access denied in integration tests |
+
+| WP  | Objective                                                                                              | Spec ref           | DoD                                                                |
+| --- | ------------------------------------------------------------------------------------------------------ | ------------------ | ------------------------------------------------------------------ |
+| 1.1 | Auth Lambda: Google OAuth, X OAuth, SMS OTP, JWT sessions in Redis                                     | SPEC §12, HLD §4.3 | All three sign-in methods reach correct portal; audit rows written |
+| 1.2 | JWT authorizer + role claims on API Gateway                                                            | HLD §4.4, §6       | Expired/revoked sessions rejected pre-Lambda                       |
+| 1.3 | RLS policies + session variables (`app.current_user_id`, `app.current_role`, `app.current_patient_id`) | HLD §4.5           | Cross-patient access denied in integration tests                   |
 
 ### Phase 2 — Core Clinical Flowchart
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 2.1 | Patient/chart CRUD + header fields incl. procedure/default hospital | SPEC §7.1 | Chart create/read with all header fields |
-| 2.2 | Follow-up row submit with full field catalog | SPEC §7.2.1 | All fields (Hb→Comments) persist; partial entry allowed |
-| 2.3 | Doctor review: prescribed doses, dose-change audit, doctor response | SPEC §7.2, §7.4 | Dose changes visibly distinct + audit rows |
-| 2.4 | Lab report upload (presigned S3 + virus scan) | SPEC §7.3, HLD §4.6-4.7 | Quarantine flow verified with EICAR test file |
+
+| WP  | Objective                                                           | Spec ref                | DoD                                                     |
+| --- | ------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------- |
+| 2.1 | Patient/chart CRUD + header fields incl. procedure/default hospital | SPEC §7.1               | Chart create/read with all header fields                |
+| 2.2 | Follow-up row submit with full field catalog                        | SPEC §7.2.1             | All fields (Hb→Comments) persist; partial entry allowed |
+| 2.3 | Doctor review: prescribed doses, dose-change audit, doctor response | SPEC §7.2, §7.4         | Dose changes visibly distinct + audit rows              |
+| 2.4 | Lab report upload (presigned S3 + virus scan)                       | SPEC §7.3, HLD §4.6-4.7 | Quarantine flow verified with EICAR test file           |
 
 ### Phase 3 — Hospital Registry (v1.7)
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 3.1 | `hospitals` + `hospital_doctor_affiliations` schema + Virtual Hospital seed | SPEC §7.0.1-7.0.2 | Virtual record present, non-deletable |
-| 3.2 | Admin hospital CRUD + affiliation management | SPEC §7.0.3 H-01…H-06 | Deactivation does not mutate historical rows |
-| 3.3 | Hospital picker API + required `engagement_hospital_id` on rows | SPEC §7.2, §7.0.3 H-07 | Submission rejected without hospital; name snapshot stored |
-| 3.4 | Hospital-filtered doctor dashboard | SPEC D-13 | Filter returns only patients with a matching engagement |
+
+| WP  | Objective                                                                   | Spec ref               | DoD                                                        |
+| --- | --------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------- |
+| 3.1 | `hospitals` + `hospital_doctor_affiliations` schema + Virtual Hospital seed | SPEC §7.0.1-7.0.2      | Virtual record present, non-deletable                      |
+| 3.2 | Admin hospital CRUD + affiliation management                                | SPEC §7.0.3 H-01…H-06  | Deactivation does not mutate historical rows               |
+| 3.3 | Hospital picker API + required `engagement_hospital_id` on rows             | SPEC §7.2, §7.0.3 H-07 | Submission rejected without hospital; name snapshot stored |
+| 3.4 | Hospital-filtered doctor dashboard                                          | SPEC D-13              | Filter returns only patients with a matching engagement    |
 
 ### Phase 4 — Notifications & Milestones
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 4.1 | Notification dispatcher + SQS FIFO channels (in-app/email/SMS/WhatsApp) | HLD §4.8 | No duplicate sends (dedup id verified) |
-| 4.2 | Milestone scheduler + reminder cancellation on submit | SPEC §7.6, HLD §4.9 | Reminders fire; submit cancels pending |
+
+| WP  | Objective                                                               | Spec ref            | DoD                                    |
+| --- | ----------------------------------------------------------------------- | ------------------- | -------------------------------------- |
+| 4.1 | Notification dispatcher + SQS FIFO channels (in-app/email/SMS/WhatsApp) | HLD §4.8            | No duplicate sends (dedup id verified) |
+| 4.2 | Milestone scheduler + reminder cancellation on submit                   | SPEC §7.6, HLD §4.9 | Reminders fire; submit cancels pending |
 
 ### Phase 5 — Conversational Chat
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 5.1 | WebSocket API + chat threads/messages (text + attachments) | SPEC §7.8, HLD §4.14 | < 1s delivery; transcript immutable |
-| 5.2 | System event cards (submission, dose change, transfer) | SPEC C-03 | Cards auto-posted with hospital name |
-| 5.3 | Read receipts, urgency triage, offline push | SPEC C-05, C-07 | Symptom-concern flags escalate |
+
+| WP  | Objective                                                  | Spec ref             | DoD                                  |
+| --- | ---------------------------------------------------------- | -------------------- | ------------------------------------ |
+| 5.1 | WebSocket API + chat threads/messages (text + attachments) | SPEC §7.8, HLD §4.14 | < 1s delivery; transcript immutable  |
+| 5.2 | System event cards (submission, dose change, transfer)     | SPEC C-03            | Cards auto-posted with hospital name |
+| 5.3 | Read receipts, urgency triage, offline push                | SPEC C-05, C-07      | Symptom-concern flags escalate       |
 
 ### Phase 6 — Care Team & Case Transfer
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 6.1 | Authorization grants (co-managing / consult), revoke, expiry | SPEC §7.9.2 | Access changes reflected next request |
-| 6.2 | Case transfer (initiate/accept/decline/admin-force) | SPEC §7.9.3 | Ownership txn atomic; full audit trail |
+
+| WP  | Objective                                                    | Spec ref    | DoD                                    |
+| --- | ------------------------------------------------------------ | ----------- | -------------------------------------- |
+| 6.1 | Authorization grants (co-managing / consult), revoke, expiry | SPEC §7.9.2 | Access changes reflected next request  |
+| 6.2 | Case transfer (initiate/accept/decline/admin-force)          | SPEC §7.9.3 | Ownership txn atomic; full audit trail |
 
 ### Phase 7 — Reporting, Export, Hardening
-| WP | Objective | Spec ref | DoD |
-|----|-----------|----------|-----|
-| 7.1 | PDF export incl. hospital column | SPEC R-01, R-05 | Layout matches paper form |
-| 7.2 | Observability, alarms, load/security test pass | HLD §4.12, §6 | Alarms fire in game-day test |
+
+| WP  | Objective                                      | Spec ref        | DoD                          |
+| --- | ---------------------------------------------- | --------------- | ---------------------------- |
+| 7.1 | PDF export incl. hospital column               | SPEC R-01, R-05 | Layout matches paper form    |
+| 7.2 | Observability, alarms, load/security test pass | HLD §4.12, §6   | Alarms fire in game-day test |
 
 ---
 
@@ -101,14 +151,14 @@ This project uses a small team of purpose-built agents. Each has a narrow role, 
 
 ### 3.1 Agent Roster
 
-| Agent | Role | Reads | Writes | Tools |
-|-------|------|-------|--------|-------|
-| **Orchestrator** | Breaks a phase into WPs, assigns them, tracks the gate status of each | Spec, HLD, LLD, this plan | Task list only | Planning/todo, dispatch |
-| **Context-Gatherer** | Investigates existing code before a change; returns a written map of relevant files/functions | Codebase | Nothing (read-only) | Search, read |
-| **Implementer** | Executes one WP: writes code + unit tests to satisfy the DoD | WP spec + gatherer output | Source, tests | Edit, run tests, build |
-| **Reviewer / Evaluator** | Judges the implementer's output against the WP acceptance checklist; returns pass/fail + reasons | Diff, WP spec, test results | Review notes | Read, run tests, diff |
-| **Infra Agent** | Owns CDK/CloudFormation changes only | `infra/`, HLD | IaC files | Edit, `cdk synth`/`diff` |
-| **Doc Agent** | Keeps spec ↔ HLD ↔ LLD ↔ code traceability current | All docs | Docs | Edit |
+| Agent                    | Role                                                                                             | Reads                       | Writes              | Tools                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------- | ------------------- | ------------------------ |
+| **Orchestrator**         | Breaks a phase into WPs, assigns them, tracks the gate status of each                            | Spec, HLD, LLD, this plan   | Task list only      | Planning/todo, dispatch  |
+| **Context-Gatherer**     | Investigates existing code before a change; returns a written map of relevant files/functions    | Codebase                    | Nothing (read-only) | Search, read             |
+| **Implementer**          | Executes one WP: writes code + unit tests to satisfy the DoD                                     | WP spec + gatherer output   | Source, tests       | Edit, run tests, build   |
+| **Reviewer / Evaluator** | Judges the implementer's output against the WP acceptance checklist; returns pass/fail + reasons | Diff, WP spec, test results | Review notes        | Read, run tests, diff    |
+| **Infra Agent**          | Owns CDK/CloudFormation changes only                                                             | `infra/`, HLD               | IaC files           | Edit, `cdk synth`/`diff` |
+| **Doc Agent**            | Keeps spec ↔ HLD ↔ LLD ↔ code traceability current                                            | All docs                    | Docs                | Edit                     |
 
 Rule of thumb: **one WP, one implementer agent, one evaluator agent.** Never let the agent that wrote the code be the sole judge of whether it passed.
 
@@ -117,12 +167,14 @@ Rule of thumb: **one WP, one implementer agent, one evaluator agent.** Never let
 Create workspace-scoped agent definitions and steering so every agent starts with the same ground truth without re-reading everything each turn.
 
 **a. Steering files** in `.kiro/steering/` (always-included project facts — keep them short):
+
 - `product.md` — one-paragraph product summary + link to `post_op_follow_up_platform_spec_v1.7.md`.
 - `structure.md` — the monorepo map (`apps/api`, `apps/web`, `infra`) and where each domain lives.
 - `tech.md` — stack + the exact build/test/lint commands agents must use.
 - `conventions.md` — coding standards, error-handling standard (LLD §9), test layout, "no PHI in logs" rule.
 
 **b. Custom agents** in `.kiro/agents/` — one definition per role in §3.1. Each definition pins:
+
 - the role prompt (what "done" means for that role),
 - the allowed tool set (least privilege — e.g. Reviewer cannot write source),
 - which steering/context files auto-load.
@@ -148,6 +200,7 @@ Orchestrator ──picks WP──► Context-Gatherer ──file map──► Im
 ### 3.4 Guardrail Hooks (optional but recommended)
 
 Use Kiro hooks to enforce the loop mechanically:
+
 - `PreToolUse` on write tools → block edits outside the WP's declared paths.
 - `PostFileSave` on `**/*.ts` → run lint/format so the evaluator never fails on style.
 - `PostTaskExec` → run the WP's test subset automatically before marking done.
@@ -160,37 +213,43 @@ Use Kiro hooks to enforce the loop mechanically:
 Agent development gets expensive when agents re-read large files, carry long transcripts, or re-derive context every turn. These practices keep cost and latency down without sacrificing correctness.
 
 ### 4.1 Scope the Context, Not the Repo
+
 - **Load domain packs, not the whole spec.** An implementer working on the hospital picker loads the hospital context pack (spec §7.0, LLD hospital tables, the 3-4 relevant files) — not the 1000-line spec.
 - **Prefer signatures over full files.** Use code-outline/AST reads for large files; pull the full body only for the function being changed.
 - **Use the context-gatherer as a compressor.** It reads broadly once and returns a short map. Downstream agents consume the map (hundreds of tokens) instead of re-reading the files (tens of thousands).
 
 ### 4.2 Keep the Working Set Small
+
 - **One WP per agent session.** Small, well-scoped WPs mean short transcripts and a clean context window.
 - **Summarize and reset between WPs.** Persist a compact "what changed + why" note to the task list, then start the next WP fresh rather than carrying the old conversation.
 - **Artifacts over transcripts for hand-offs** (see §3.3). A diff summary + pass/fail JSON is far cheaper than replaying a dialogue.
 
 ### 4.3 Cache the Stable Stuff
+
 - **Steering files carry durable facts** (structure, commands, conventions) so agents never re-discover them. Keep steering lean — every always-included token is paid on every turn.
 - **Reuse gatherer output** within a WP; don't re-investigate the same question with reworded prompts.
 - **Pin versions and commands** in `tech.md` so agents don't spend turns probing "which test runner is this."
 
 ### 4.4 Right-Size the Model and the Turn
+
 - **Match model to task.** Use a smaller/cheaper model for mechanical work (formatting, boilerplate, test scaffolds) and reserve the strongest model for design-level reasoning and evaluation.
 - **Batch independent tool calls.** Reads/searches with no dependency between them go in one turn, not a chain of round-trips.
 - **Cap retries** (§3.3). Thrashing is the largest silent token cost; a 2-retry ceiling plus human escalation bounds it.
 
 ### 4.5 Write Efficiently
+
 - **Targeted edits over full rewrites.** Use string-replace edits for changes to existing files; only rewrite a file when it's genuinely new or mostly changed. (Full rewrites of large files also risk transport failures — chunk them.)
 - **Don't re-read after a successful rename/move.** Trust tool success messages instead of re-verifying by reading the file back.
 
 ### 4.6 A Simple Token Budget
-| Activity | Guideline |
-|----------|-----------|
+
+| Activity            | Guideline                                                   |
+| ------------------- | ----------------------------------------------------------- |
 | Context load per WP | Aim < 15k tokens (domain pack + gatherer map + target file) |
-| Implementer turn | Prefer incremental edits; avoid re-pasting unchanged code |
-| Evaluator turn | Feed the diff + checklist, not the whole file tree |
-| Hand-off artifact | Keep under ~1k tokens (summary, not transcript) |
-| Retry ceiling | 2 automated cycles, then escalate |
+| Implementer turn    | Prefer incremental edits; avoid re-pasting unchanged code   |
+| Evaluator turn      | Feed the diff + checklist, not the whole file tree          |
+| Hand-off artifact   | Keep under ~1k tokens (summary, not transcript)             |
+| Retry ceiling       | 2 automated cycles, then escalate                           |
 
 Track spend per phase; if a phase overruns its budget, the usual cause is oversized WPs or missing steering — fix the process, not the ceiling.
 
@@ -215,7 +274,9 @@ Validation is layered: fast checks run on every change, heavier checks run at ph
 ```
 
 ### 5.2 Per-WP Evaluation (the gate)
+
 Every WP is evaluated before it is accepted. The evaluator agent checks, in order:
+
 1. **Builds & lints clean** — `npm run build && npm run lint`.
 2. **Tests pass** — the WP ships unit tests; they run green and cover the DoD's behavior, not just happy path.
 3. **DoD checklist met** — each DoD bullet is demonstrably satisfied (link to the test or output that proves it).
@@ -225,7 +286,9 @@ Every WP is evaluated before it is accepted. The evaluator agent checks, in orde
 Output is a short pass/fail record with reasons. A "command exited 0" is **not** acceptance — the evaluator confirms the behavior the WP promised.
 
 ### 5.3 Integration Validation (per phase)
+
 Run against an ephemeral environment (throwaway Aurora + LocalStack or a sandbox account):
+
 - **RLS enforcement:** a patient/doctor cannot read another patient's rows; transferred doctor sees only pre-transfer rows; patient never sees the internal consult thread.
 - **Hospital rules:** submission rejected without `engagement_hospital_id`; picker returns only the primary doctor's active affiliations + Virtual; deactivating a hospital leaves historical rows intact.
 - **Notifications:** no duplicate reminders (dedup id); submit cancels pending reminders; no PHI in SMS/WhatsApp/chat-alert bodies.
@@ -233,26 +296,32 @@ Run against an ephemeral environment (throwaway Aurora + LocalStack or a sandbox
 - **Chat:** message delivered < 1s; transcript is immutable (UPDATE/DELETE denied at DB grant level).
 
 ### 5.4 End-to-End Journeys (per portal)
+
 Automate the spec's user flows with Playwright:
+
 - Patient: sign in → pick hospital → submit follow-up → receive doctor response → chat.
 - Doctor: review submission → prescribe doses → reply → grant consult access → filter dashboard by hospital.
 - Transfer: initiate → target accepts → ownership + audit + chat system card verified.
 - Admin: register hospital → add affiliation → deactivate hospital.
 
 ### 5.5 Non-Functional Validation
+
 - **Security:** dependency/secret scanning in CI; auth/rate-limit tests; least-privilege IAM review; a scoped pen-test before go-live.
 - **Performance:** load test the core write path and the chat WebSocket to the spec targets (chat < 1s, hospital picker search < 300ms).
 - **Reliability:** game-day — kill a Lambda/DLQ backup and confirm alarms + recovery.
 - **Data residency:** confirm all stateful services and buckets are in ap-south-1.
 
 ### 5.6 Acceptance Validation (release gate)
+
 Map each item in **spec §18 Acceptance Criteria (MVP)** to at least one automated test or a signed-off manual check. The release is accepted only when:
+
 - All §18 criteria (1–23, including the v1.7 hospital criteria 17–23) have a passing linked check.
 - All phase integration + E2E suites are green.
 - Security and performance NFR checks pass.
 - A human has reviewed every safety-sensitive area (authentication, RLS/authorization, case transfer, PHI handling).
 
 ### 5.7 Continuous Validation
+
 - CI runs unit + lint on every PR; integration on merge to main; E2E nightly against staging.
 - A regression suite grows with every bug: each fixed defect adds a test so agents can't silently reintroduce it.
 - Traceability report (Doc Agent) flags any spec section without a corresponding test or implementation.

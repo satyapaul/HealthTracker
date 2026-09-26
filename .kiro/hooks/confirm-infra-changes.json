@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Confirm Infra Changes",
+      "trigger": "PreToolUse",
+      "description": "Prompts for confirmation before any write that targets infra/ (CDK/CloudFormation), since infra changes have a broad blast radius. Non-infra writes pass through untouched.",
+      "matcher": "fs_write|str_replace|fs_append",
+      "action": {
+        "type": "command",
+        "command": "INPUT=$(cat); TARGET=$(printf '%s' \"$INPUT\" | grep -oE '\"(path|targetFile)\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -n1 | sed -E 's/.*:[[:space:]]*\"([^\"]*)\"/\\1/'); case \"$TARGET\" in */infra/*|infra/*) printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"This write targets infra/ (CDK/CloudFormation). Infra changes have a broad blast radius; confirm before proceeding.\"}}';; *) : ;; esac; exit 0",
+        "timeout": 30
+      }
+    }
+  ]
+}

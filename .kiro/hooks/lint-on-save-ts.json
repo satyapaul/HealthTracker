@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Lint on Save (TypeScript)",
+      "trigger": "PostFileSave",
+      "description": "Runs lint/format on saved TypeScript files so the evaluator never fails on style. Degrades gracefully until the monorepo lint tooling lands in Phase 0.1.",
+      "matcher": "\\.(ts|tsx)$",
+      "action": {
+        "type": "command",
+        "command": "if [ -f package.json ] && grep -q '\"lint\"' package.json; then npm run lint --silent; else echo \"No lint script configured yet (Phase 0.1 pending); skipping.\"; fi",
+        "timeout": 120
+      }
+    }
+  ]
+}

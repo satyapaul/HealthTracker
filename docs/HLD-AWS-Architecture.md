@@ -1,16 +1,18 @@
 # High-Level Design (HLD)
+
 # Post-Operative Investigation Follow-Up Platform
 
-| Field | Value |
-|-------|-------|
+| Field             | Value                                       |
+| ----------------- | ------------------------------------------- |
 | **Document type** | High-Level Design & AWS Technology Topology |
-| **Version** | 2.0 |
-| **Date** | August 29, 2026 |
-| **Based on** | Application Specification v1.7 |
-| **Supersedes** | HLD v1.0 (based on App Spec v1.3) |
+| **Version**       | 2.0                                         |
+| **Date**          | August 29, 2026                             |
+| **Based on**      | Application Specification v1.7              |
+| **Supersedes**    | HLD v1.0 (based on App Spec v1.3)           |
 
 > **What changed from HLD v1.0 → v2.0**
 > HLD v1.0 was based on Application Spec v1.3. The spec has since advanced to **v1.7**, adding three major feature areas that materially affect the architecture:
+>
 > 1. **Conversational Chat** (spec §7.8) — real-time patient↔care-team messaging with text, voice notes, image/PDF attachments, system event cards, and an immutable transcript.
 > 2. **Multi-Doctor Collaboration & Case Transfer** (spec §7.9) — care-team authorization (primary / co-managing / consulting / transferred roles) and formal primary-ownership handoff with an audit trail.
 > 3. **Hospital Registry & engagement-level hospital association** (spec §7.0, v1.7) — an admin-managed hospital directory, doctor–hospital affiliations, a system-seeded Virtual Hospital record, and a required `engagement_hospital_id` on every follow-up row.
@@ -139,22 +141,22 @@ The platform is organized into three logical layers. Each layer maps to specific
 
 ### 4.1 Networking & Edge
 
-| Component | AWS Service | Rationale |
-|-----------|-------------|-----------|
-| DNS | Route 53 | Managed DNS with health checks; alias records to CloudFront and ALB |
-| CDN + HTTPS termination | CloudFront | Edge caching of SPA assets; TLS offload; Origin Access Control to S3 |
-| DDoS & WAF | AWS WAF on CloudFront | Block OWASP top-10 exploits, rate-limit auth endpoints, geo-restrict if needed |
-| API edge | API Gateway (HTTP API) | Low-latency JWT authorizer; routes to Lambda functions; WebSocket for real-time notifications |
-| VPC | Single VPC in ap-south-1 | Two private subnets (AZ-a, AZ-b) for RDS and Redis; no public subnets for compute |
-| NAT | NAT Gateway (one per AZ) | Lambda and Fargate in private subnets reach internet (OAuth, SMS, WhatsApp APIs) |
+| Component               | AWS Service              | Rationale                                                                                     |
+| ----------------------- | ------------------------ | --------------------------------------------------------------------------------------------- |
+| DNS                     | Route 53                 | Managed DNS with health checks; alias records to CloudFront and ALB                           |
+| CDN + HTTPS termination | CloudFront               | Edge caching of SPA assets; TLS offload; Origin Access Control to S3                          |
+| DDoS & WAF              | AWS WAF on CloudFront    | Block OWASP top-10 exploits, rate-limit auth endpoints, geo-restrict if needed                |
+| API edge                | API Gateway (HTTP API)   | Low-latency JWT authorizer; routes to Lambda functions; WebSocket for real-time notifications |
+| VPC                     | Single VPC in ap-south-1 | Two private subnets (AZ-a, AZ-b) for RDS and Redis; no public subnets for compute             |
+| NAT                     | NAT Gateway (one per AZ) | Lambda and Fargate in private subnets reach internet (OAuth, SMS, WhatsApp APIs)              |
 
 ### 4.2 Frontend Hosting
 
-| Component | AWS Service | Notes |
-|-----------|-------------|-------|
-| SPA bundle storage | S3 (versioned bucket) | Patient portal, doctor portal, admin portal served as a single React app with route-based role separation |
-| Static asset delivery | CloudFront distribution | `app.postopcare.in` → CloudFront → S3 origin |
-| CI/CD deployment | CodePipeline + CodeBuild | On merge to main: build, test, upload to S3, CloudFront cache invalidation |
+| Component             | AWS Service              | Notes                                                                                                     |
+| --------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| SPA bundle storage    | S3 (versioned bucket)    | Patient portal, doctor portal, admin portal served as a single React app with route-based role separation |
+| Static asset delivery | CloudFront distribution  | `app.postopcare.in` → CloudFront → S3 origin                                                              |
+| CI/CD deployment      | CodePipeline + CodeBuild | On merge to main: build, test, upload to S3, CloudFront cache invalidation                                |
 
 ### 4.3 Authentication Service
 
@@ -178,12 +180,12 @@ OAuth and OTP are security-sensitive; isolated as a dedicated Lambda-backed micr
                 └─────────────────────────────────────────────────┘
 ```
 
-| AWS Service | Usage |
-|-------------|-------|
-| Lambda (auth) | Stateless function; cold-start acceptable for auth path |
-| Secrets Manager | Store Google client secret, X client secret, JWT signing key; rotated automatically |
-| ElastiCache for Redis (Serverless) | OTP hashes (5-min TTL), session tokens, rate-limit counters |
-| Systems Manager Parameter Store | Non-secret config (OAuth redirect URIs, OTP length, rate-limit thresholds) |
+| AWS Service                        | Usage                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| Lambda (auth)                      | Stateless function; cold-start acceptable for auth path                             |
+| Secrets Manager                    | Store Google client secret, X client secret, JWT signing key; rotated automatically |
+| ElastiCache for Redis (Serverless) | OTP hashes (5-min TTL), session tokens, rate-limit counters                         |
+| Systems Manager Parameter Store    | Non-secret config (OAuth redirect URIs, OTP length, rate-limit thresholds)          |
 
 ### 4.4 Core Application API
 
@@ -211,6 +213,7 @@ API Gateway (HTTP API)
 All Lambdas share a VPC-attached RDS Proxy → Aurora PostgreSQL Serverless v2.
 
 **JWT Authorizer on API Gateway:**
+
 - Validates token from Redis on every request.
 - Injects `{ userId, role, patientId? }` into Lambda context.
 - Rejects expired or revoked sessions before Lambdas execute.
@@ -219,20 +222,21 @@ All Lambdas share a VPC-attached RDS Proxy → Aurora PostgreSQL Serverless v2.
 
 Primary relational store for all entities from the data model (§9 of spec).
 
-| Characteristic | Choice |
-|----------------|--------|
-| Engine | Aurora PostgreSQL 16 compatible |
-| Mode | Serverless v2 — scales ACUs 0.5 → 16 (cost-optimal for clinic-scale load) |
-| Multi-AZ | Writer + one reader in different AZs (failover < 30s, satisfies 99.5% SLO) |
-| Encryption | AWS-managed KMS key (PHI at rest) |
-| Backup | Automated daily snapshots, 35-day retention; point-in-time recovery ≤ 5-min RPO |
-| Proxy | RDS Proxy (Lambda connection pooling; prevents exhaustion during burst) |
-| Schema migrations | Flyway (run in CodeBuild pipeline step, pre-deployment) |
+| Characteristic    | Choice                                                                          |
+| ----------------- | ------------------------------------------------------------------------------- |
+| Engine            | Aurora PostgreSQL 16 compatible                                                 |
+| Mode              | Serverless v2 — scales ACUs 0.5 → 16 (cost-optimal for clinic-scale load)       |
+| Multi-AZ          | Writer + one reader in different AZs (failover < 30s, satisfies 99.5% SLO)      |
+| Encryption        | AWS-managed KMS key (PHI at rest)                                               |
+| Backup            | Automated daily snapshots, 35-day retention; point-in-time recovery ≤ 5-min RPO |
+| Proxy             | RDS Proxy (Lambda connection pooling; prevents exhaustion during burst)         |
+| Schema migrations | Flyway (run in CodeBuild pipeline step, pre-deployment)                         |
 
 Key tables (from spec data model):
 `users`, `auth_identities`, `auth_sessions`, `otp_challenges`, `patients`, `follow_up_protocols`, `milestones`, `reminder_schedules`, `follow_up_rows`, `dose_changes`, `doctor_responses`, `notifications`
 
 **✳️ New tables introduced by spec v1.4–v1.7:**
+
 - `chat_threads` — per-patient threads; `thread_type ∈ {patient_care_team, doctor_internal_consult}`.
 - `chat_messages` — text/voice/attachment/system-card messages; `sender_role`, `urgency_flag`, `linked_follow_up_row_id`, `read_by_user_ids`.
 - `chat_attachments` — file metadata (image/pdf/audio) → S3 object keys.
@@ -244,28 +248,31 @@ Key tables (from spec data model):
 - ✳️ `patients` gains `procedure_hospital_id` and `default_followup_hospital_id`.
 
 **Row-level security (RLS):**
-- Patients can SELECT only rows where `patient_id = current_setting('app.patient_id')`.
+
+- Patients can SELECT only rows where `patient_id = current_setting('app.current_patient_id')`.
 - ✳️ Doctors can SELECT only rows for patients where they hold an **active** row in `doctor_authorizations` (or are the `primary_doctor_id`). `consult_view` doctors are further restricted to read-only and cannot see the `doctor_internal_consult` thread of patients they are not authorized on.
 - ✳️ Transferred (former) doctors retain SELECT only on rows with `created_at <= transfer timestamp`.
 - ✳️ Chat message visibility: `doctor_internal_consult` threads are excluded from any query executed under a `patient`/`caregiver` role.
-- Applied as PostgreSQL RLS policies; the application layer sets session variables (`app.user_id`, `app.role`, `app.patient_id`).
+- Applied as PostgreSQL RLS policies; the application layer sets session variables (`app.current_user_id`, `app.current_role`, `app.current_patient_id`).
 
 ### 4.6 File Storage — S3
 
-| Bucket | Purpose | Access |
-|--------|---------|--------|
-| `postopcare-lab-reports-{accountId}` | Patient-uploaded lab PDFs and images | Private; presigned URLs (15-min TTL) for upload and download |
-| `postopcare-exports-{accountId}` | Doctor/patient PDF chart exports | Private; presigned URL for download, deleted after 24h (S3 lifecycle) |
-| `postopcare-assets-{accountId}` | Patient photos, 🆕 hospital logos, static app assets | Private; served via CloudFront with Origin Access Control |
+| Bucket                                 | Purpose                                                    | Access                                                                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `postopcare-lab-reports-{accountId}`   | Patient-uploaded lab PDFs and images                       | Private; presigned URLs (15-min TTL) for upload and download                                                                             |
+| `postopcare-exports-{accountId}`       | Doctor/patient PDF chart exports                           | Private; presigned URL for download, deleted after 24h (S3 lifecycle)                                                                    |
+| `postopcare-assets-{accountId}`        | Patient photos, 🆕 hospital logos, static app assets       | Private; served via CloudFront with Origin Access Control                                                                                |
 | 🆕 `postopcare-chat-media-{accountId}` | Chat attachments (images/PDFs) and **voice notes** (audio) | Private; presigned upload/download (15-min TTL); virus-scanned; retained as part of the permanent EHR (7-year lifecycle, no auto-delete) |
 
 All buckets:
+
 - Server-side encryption: SSE-KMS.
 - Versioning enabled.
 - Block all public access.
 - Object lifecycle: lab reports retained 7 years; exports 1 day.
 
 **Upload flow:**
+
 ```
 Patient App → POST /followup/attachments/presign
            ← 201 { uploadUrl, objectKey }
@@ -323,12 +330,14 @@ Handles four channels: in-app, email, SMS, WhatsApp.
 **SQS FIFO queues** ensure at-most-once delivery per deduplication ID (milestone_id + reminder_type), satisfying requirement M-09 (no duplicate reminders).
 
 **✳️ Event types feeding the dispatcher (v1.7):** in addition to `FollowUpSubmitted` and `DoctorResponded`, the dispatcher now fans out:
+
 - `ChatMessageReceived` → push to recipient(s) via WebSocket + SMS/WhatsApp alert for `symptom_concern`-flagged messages (spec C-07).
 - `DoctorAuthorized` / `AccessRevoked` → notify patient (app/SMS/WhatsApp) and the added doctor (spec T-06).
 - `CaseTransferInitiated` → notify target doctor (email + in-app) with handoff summary.
 - `CaseTransferCompleted` → notify patient, incoming and outgoing doctor, and care team; post a system card into the patient chat thread (spec T-12, T-13).
 
 **Real-time in-app notifications:**
+
 - API Gateway WebSocket endpoint: `wss://ws.postopcare.in` (shared with the Chat Engine, §4.14).
 - Connection IDs stored in Redis (user_id → connectionId set) with a DynamoDB backup table for reconnection.
 - InApp Lambda pushes to open connections; falls back to mark notification unread if connection closed.
@@ -353,6 +362,7 @@ EventBridge Scheduler
 ```
 
 **Overdue detection:**
+
 - Second EventBridge rule runs daily at 08:30 IST.
 - Marks milestones as `overdue` if due_date < NOW() and status = `scheduled`.
 - Enqueues overdue reminder if not yet sent.
@@ -376,29 +386,30 @@ For chart sizes > 50 rows or cold-start sensitivity: offload to Fargate task tri
 
 Requirements: immutable dose change log, auth event log, reminder delivery log.
 
-| Log type | Store | Why |
-|----------|-------|-----|
-| Dose changes | `dose_changes` table in Aurora RDS | Relational queries (who, when, which patient), JOIN with follow-up rows |
-| Auth events (login, logout, OTP, OAuth) | DynamoDB (`audit_auth` table) | High write throughput; no complex joins; append-only TTL 7 years |
-| Reminder delivery receipts | DynamoDB (`reminder_delivery` table) | High volume per patient per milestone; write-heavy |
-| API access log | API Gateway Access Logs → CloudWatch Logs | Immutable; exportable to S3 via log group export |
-| Lambda execution log | CloudWatch Logs | Centralized; retention 365 days |
+| Log type                                | Store                                     | Why                                                                     |
+| --------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------- |
+| Dose changes                            | `dose_changes` table in Aurora RDS        | Relational queries (who, when, which patient), JOIN with follow-up rows |
+| Auth events (login, logout, OTP, OAuth) | DynamoDB (`audit_auth` table)             | High write throughput; no complex joins; append-only TTL 7 years        |
+| Reminder delivery receipts              | DynamoDB (`reminder_delivery` table)      | High volume per patient per milestone; write-heavy                      |
+| API access log                          | API Gateway Access Logs → CloudWatch Logs | Immutable; exportable to S3 via log group export                        |
+| Lambda execution log                    | CloudWatch Logs                           | Centralized; retention 365 days                                         |
 
 DynamoDB tables use:
+
 - On-demand billing (clinic-scale traffic).
 - Point-in-time recovery enabled.
 - KMS encryption.
 
 ### 4.12 Observability Stack
 
-| Concern | AWS Service |
-|---------|-------------|
-| Metrics | CloudWatch Metrics (Lambda duration/error, SQS depth, RDS ACU) |
-| Alarms | CloudWatch Alarms → SNS → email/PagerDuty for p99 latency, error rate, DLQ depth > 0 |
-| Distributed tracing | AWS X-Ray (trace across API GW → Lambda → RDS Proxy → Aurora) |
-| Structured logs | CloudWatch Logs + Log Insights queries for audit queries |
-| Dashboard | CloudWatch Dashboard (key business metrics: submissions/day, notifications sent, failed deliveries) |
-| Cost | AWS Cost Explorer + Budget Alert at $X/month |
+| Concern             | AWS Service                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| Metrics             | CloudWatch Metrics (Lambda duration/error, SQS depth, RDS ACU)                                      |
+| Alarms              | CloudWatch Alarms → SNS → email/PagerDuty for p99 latency, error rate, DLQ depth > 0                |
+| Distributed tracing | AWS X-Ray (trace across API GW → Lambda → RDS Proxy → Aurora)                                       |
+| Structured logs     | CloudWatch Logs + Log Insights queries for audit queries                                            |
+| Dashboard           | CloudWatch Dashboard (key business metrics: submissions/day, notifications sent, failed deliveries) |
+| Cost                | AWS Cost Explorer + Budget Alert at $X/month                                                        |
 
 ### 4.13 CI/CD Pipeline
 
@@ -450,16 +461,16 @@ Real-time, HIPAA/PHI-compliant messaging between the patient/caregiver and the a
                                                        triage alert)
 ```
 
-| Concern | Decision |
-|---------|----------|
-| Transport | API Gateway **WebSocket API** — managed, scales connections, integrates with Lambda; no self-managed socket servers |
-| Persistence | Transcript in Aurora (`chat_messages`, `chat_attachments`); **immutable** — no user UPDATE/DELETE (spec C-10); enforced by RLS + revoke of UPDATE/DELETE grants |
-| Media | Voice notes and attachments in `postopcare-chat-media` S3 bucket; presigned upload; virus-scanned before release |
-| Delivery state | `read_by_user_ids[]` maintained per message; receipts pushed over WebSocket (spec C-05) |
-| Offline delivery | If recipient has no open connection, the `ChatMessageReceived` event triggers a push/SMS/WhatsApp alert with a deep link (no PHI in the message body) |
-| Internal consult | `doctor_internal_consult` thread hidden from patient at the RLS layer (spec C-08) |
-| Latency target | < 1 s end-to-end (matches spec NFR) |
-| Phase split | MVP: text + image/PDF attachments + patient↔care-team thread. Phase 2: voice notes, internal consult thread, audio transcription (spec §13–14) |
+| Concern          | Decision                                                                                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport        | API Gateway **WebSocket API** — managed, scales connections, integrates with Lambda; no self-managed socket servers                                             |
+| Persistence      | Transcript in Aurora (`chat_messages`, `chat_attachments`); **immutable** — no user UPDATE/DELETE (spec C-10); enforced by RLS + revoke of UPDATE/DELETE grants |
+| Media            | Voice notes and attachments in `postopcare-chat-media` S3 bucket; presigned upload; virus-scanned before release                                                |
+| Delivery state   | `read_by_user_ids[]` maintained per message; receipts pushed over WebSocket (spec C-05)                                                                         |
+| Offline delivery | If recipient has no open connection, the `ChatMessageReceived` event triggers a push/SMS/WhatsApp alert with a deep link (no PHI in the message body)           |
+| Internal consult | `doctor_internal_consult` thread hidden from patient at the RLS layer (spec C-08)                                                                               |
+| Latency target   | < 1 s end-to-end (matches spec NFR)                                                                                                                             |
+| Phase split      | MVP: text + image/PDF attachments + patient↔care-team thread. Phase 2: voice notes, internal consult thread, audio transcription (spec §13–14)                 |
 
 ### 🆕 4.15 Care Team Authorization & Case Transfer Service (spec §7.9)
 
@@ -481,12 +492,12 @@ Doctor/Admin App
   → POST /admin/transfers/:id/force  → Admin override (no target accept)
 ```
 
-| Concern | Decision |
-|---------|----------|
-| Expiry enforcement | A daily EventBridge rule (reuses the milestone scheduler cadence) flips time-bound `consult_view` grants to `status=expired` (spec T-03) |
-| Consistency | Ownership transfer wrapped in a single DB transaction (patient row + authorization rows + transfer log) to avoid split state |
-| Audit | `case_transfer_log` and `doctor_authorizations` are append-only history; role changes never overwrite prior records (spec T-14) |
-| Access recompute | On any grant/revoke/transfer, the RLS-backing view of "doctors authorized for patient X" reflects the change on the next request; sessions carry only identity, not cached patient ACLs |
+| Concern            | Decision                                                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Expiry enforcement | A daily EventBridge rule (reuses the milestone scheduler cadence) flips time-bound `consult_view` grants to `status=expired` (spec T-03)                                                |
+| Consistency        | Ownership transfer wrapped in a single DB transaction (patient row + authorization rows + transfer log) to avoid split state                                                            |
+| Audit              | `case_transfer_log` and `doctor_authorizations` are append-only history; role changes never overwrite prior records (spec T-14)                                                         |
+| Access recompute   | On any grant/revoke/transfer, the RLS-backing view of "doctors authorized for patient X" reflects the change on the next request; sessions carry only identity, not cached patient ACLs |
 
 ### 🆕 4.16 Hospital Registry Service (spec §7.0, v1.7)
 
@@ -505,24 +516,24 @@ Patient/Doctor App (new engagement)
                                                primary doctor + Virtual (pinned)
 ```
 
-| Concern | Decision |
-|---------|----------|
-| Virtual Hospital | Seeded row (`hospital_code=VIRTUAL`, well-known UUID); cannot be edited/deactivated; always first in picker |
+| Concern               | Decision                                                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Virtual Hospital      | Seeded row (`hospital_code=VIRTUAL`, well-known UUID); cannot be edited/deactivated; always first in picker                                                                       |
 | Referential integrity | `engagement_hospital_id` on `follow_up_rows` is `NOT NULL` with FK to `hospitals`; a **name snapshot** column keeps historical rows readable if a hospital is renamed/deactivated |
-| Caching | The (small, bounded) hospital list is cached in Redis and client-side for offline chart rendering; picker search target < 300 ms (spec NFR) |
-| Data residency | Hospital records are non-PHI reference data but still reside in ap-south-1 with the rest of the stack |
-| Deactivation safety | Deactivating a hospital removes it from pickers but never mutates historical engagement rows |
+| Caching               | The (small, bounded) hospital list is cached in Redis and client-side for offline chart rendering; picker search target < 300 ms (spec NFR)                                       |
+| Data residency        | Hospital records are non-PHI reference data but still reside in ap-south-1 with the rest of the stack                                                                             |
+| Deactivation safety   | Deactivating a hospital removes it from pickers but never mutates historical engagement rows                                                                                      |
 
 ---
 
 ## 5. AWS Region & Availability Strategy
 
-| Dimension | Decision |
-|-----------|----------|
-| Primary region | **ap-south-1 (Mumbai)** — data residency, low latency for India users |
-| AZ redundancy | All stateful services span 2 AZs (Aurora Multi-AZ, RDS Proxy, Redis Serverless) |
+| Dimension         | Decision                                                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Primary region    | **ap-south-1 (Mumbai)** — data residency, low latency for India users                                                         |
+| AZ redundancy     | All stateful services span 2 AZs (Aurora Multi-AZ, RDS Proxy, Redis Serverless)                                               |
 | Disaster recovery | Tier: Backup & Restore — daily Aurora snapshots cross-copied to ap-southeast-1 (Singapore); RTO ~4h, RPO ≤ 24h (matches spec) |
-| CDN | CloudFront global PoPs; origin in ap-south-1 |
+| CDN               | CloudFront global PoPs; origin in ap-south-1                                                                                  |
 
 ---
 
@@ -565,6 +576,7 @@ VPC (private subnets only for compute & data)
 **PHI boundary:** No PHI in SMS/WhatsApp message body (per spec §7.6.4). Message templates contain only due date, app name, and deep link. ✳️ The same rule applies to **chat push/SMS/WhatsApp alerts** — the notification body carries only "New message from your care team" plus a deep link; message content stays inside the authenticated app.
 
 **RBAC enforcement layers (✳️ updated for v1.7):**
+
 1. JWT Authorizer rejects invalid/expired sessions (applies to both the HTTP API and the WebSocket `$connect` route).
 2. Lambda checks the `role` claim before executing any operation.
 3. **✳️ Care-team authorization check** — for any doctor operation on a patient, the service confirms an active row in `doctor_authorizations` (or `primary_doctor_id` match) at the correct `access_level` before proceeding (e.g. `consult_view` cannot prescribe or post to the patient thread).
@@ -572,6 +584,7 @@ VPC (private subnets only for compute & data)
 5. **🆕 Hospital scoping** — hospital pickers only return facilities the acting doctor is affiliated with; the API rejects an `engagement_hospital_id` that is neither the Virtual Hospital nor an active affiliation of the patient's primary doctor.
 
 **Secrets management:**
+
 - Google/X OAuth client secrets → Secrets Manager, auto-rotated.
 - JWT signing key → Secrets Manager.
 - DB credentials → Secrets Manager (RDS Proxy native integration).
@@ -759,52 +772,52 @@ Patient App
 
 Assumptions: ~50 active patients, ~5 doctors, ~200 follow-up submissions/month, ~500 reminder SMS+WhatsApp/month.
 
-| Service | Tier | Est. monthly cost (USD) |
-|---------|------|------------------------|
-| Aurora PostgreSQL Serverless v2 | 0.5–2 ACU, 20 GB storage | ~$30–50 |
-| Lambda | ~10k invocations/month | < $1 |
-| API Gateway (HTTP API) | ~50k requests/month | < $1 |
-| 🆕 API Gateway WebSocket | Chat + in-app; low connection-minutes at clinic scale | < $2 |
-| 🆕 S3 chat-media (voice/attachments) | < 2 GB, retained | ~$1 |
-| ElastiCache Redis Serverless | < 1 GB data, low requests | ~$10 |
-| S3 + CloudFront | < 5 GB storage, < 10 GB transfer | ~$5 |
-| SES (email) | ~500 emails/month | < $1 |
-| SQS FIFO | ~5k messages/month | < $1 |
-| EventBridge Scheduler | ~60 invocations/month | < $1 |
-| DynamoDB (on-demand) | < 1 GB, low WCU | < $5 |
-| CloudWatch | Logs, metrics, alarms | ~$5 |
-| **SMS / WhatsApp** | External (MSG91/Twilio + Meta) | ~$20–40 |
-| **Total AWS** | | ~$58–85/month |
+| Service                              | Tier                                                  | Est. monthly cost (USD) |
+| ------------------------------------ | ----------------------------------------------------- | ----------------------- |
+| Aurora PostgreSQL Serverless v2      | 0.5–2 ACU, 20 GB storage                              | ~$30–50                 |
+| Lambda                               | ~10k invocations/month                                | < $1                    |
+| API Gateway (HTTP API)               | ~50k requests/month                                   | < $1                    |
+| 🆕 API Gateway WebSocket             | Chat + in-app; low connection-minutes at clinic scale | < $2                    |
+| 🆕 S3 chat-media (voice/attachments) | < 2 GB, retained                                      | ~$1                     |
+| ElastiCache Redis Serverless         | < 1 GB data, low requests                             | ~$10                    |
+| S3 + CloudFront                      | < 5 GB storage, < 10 GB transfer                      | ~$5                     |
+| SES (email)                          | ~500 emails/month                                     | < $1                    |
+| SQS FIFO                             | ~5k messages/month                                    | < $1                    |
+| EventBridge Scheduler                | ~60 invocations/month                                 | < $1                    |
+| DynamoDB (on-demand)                 | < 1 GB, low WCU                                       | < $5                    |
+| CloudWatch                           | Logs, metrics, alarms                                 | ~$5                     |
+| **SMS / WhatsApp**                   | External (MSG91/Twilio + Meta)                        | ~$20–40                 |
+| **Total AWS**                        |                                                       | ~$58–85/month           |
 
-*SMS/WhatsApp costs are external and volume-dependent. Indian DLT-registered SMS via MSG91 ~₹0.15–0.25/SMS.*
+_SMS/WhatsApp costs are external and volume-dependent. Indian DLT-registered SMS via MSG91 ~₹0.15–0.25/SMS._
 
 ---
 
 ## 10. Technology Stack Summary
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 18, TypeScript, TailwindCSS, React Query |
-| **API runtime** | Node.js 22 (Lambda) |
-| **Database** | PostgreSQL 16 (Aurora Serverless v2) |
-| **Cache / sessions** | Redis 7 (ElastiCache Serverless) |
-| **Object storage** | Amazon S3 |
-| **CDN / edge** | Amazon CloudFront + AWS WAF |
-| **DNS** | Amazon Route 53 |
-| **Auth (OAuth broker)** | AWS Lambda (custom, no Cognito — X OAuth not supported natively) |
-| **Email** | Amazon SES |
-| **SMS** | MSG91 (India DLT registered) or Twilio |
-| **WhatsApp** | Meta Cloud API or Gupshup (approved templates) |
-| **Scheduler** | Amazon EventBridge Scheduler |
-| **Message queues** | Amazon SQS FIFO |
+| Layer                                 | Technology                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------- |
+| **Frontend**                          | React 18, TypeScript, TailwindCSS, React Query                                  |
+| **API runtime**                       | Node.js 22 (Lambda)                                                             |
+| **Database**                          | PostgreSQL 16 (Aurora Serverless v2)                                            |
+| **Cache / sessions**                  | Redis 7 (ElastiCache Serverless)                                                |
+| **Object storage**                    | Amazon S3                                                                       |
+| **CDN / edge**                        | Amazon CloudFront + AWS WAF                                                     |
+| **DNS**                               | Amazon Route 53                                                                 |
+| **Auth (OAuth broker)**               | AWS Lambda (custom, no Cognito — X OAuth not supported natively)                |
+| **Email**                             | Amazon SES                                                                      |
+| **SMS**                               | MSG91 (India DLT registered) or Twilio                                          |
+| **WhatsApp**                          | Meta Cloud API or Gupshup (approved templates)                                  |
+| **Scheduler**                         | Amazon EventBridge Scheduler                                                    |
+| **Message queues**                    | Amazon SQS FIFO                                                                 |
 | **🆕 Real-time chat / notifications** | API Gateway WebSocket API + Lambda; connection state in Redis (DynamoDB backup) |
-| **🆕 Chat transcript** | Aurora PostgreSQL (immutable); media in S3 (`chat-media` bucket) |
-| **Audit log** | Amazon DynamoDB + CloudWatch Logs |
-| **PDF export** | AWS Lambda + Puppeteer (Chromium layer) |
-| **IaC** | AWS CDK (TypeScript) |
-| **CI/CD** | AWS CodePipeline + CodeBuild |
-| **Secrets** | AWS Secrets Manager |
-| **Observability** | CloudWatch Metrics, Logs, Alarms, X-Ray |
+| **🆕 Chat transcript**                | Aurora PostgreSQL (immutable); media in S3 (`chat-media` bucket)                |
+| **Audit log**                         | Amazon DynamoDB + CloudWatch Logs                                               |
+| **PDF export**                        | AWS Lambda + Puppeteer (Chromium layer)                                         |
+| **IaC**                               | AWS CDK (TypeScript)                                                            |
+| **CI/CD**                             | AWS CodePipeline + CodeBuild                                                    |
+| **Secrets**                           | AWS Secrets Manager                                                             |
+| **Observability**                     | CloudWatch Metrics, Logs, Alarms, X-Ray                                         |
 
 ---
 
@@ -888,57 +901,57 @@ Assumptions: ~50 active patients, ~5 doctors, ~200 follow-up submissions/month, 
 
 The following architecture components are required for Phase 1 / MVP (matching spec §14):
 
-| Component | MVP Required | Notes |
-|-----------|-------------|-------|
-| React SPA on S3 + CloudFront | ✅ | Patient + Doctor portals |
-| API Gateway + Core Lambdas | ✅ | All clinical CRUD |
-| Auth Lambda (Google + X + SMS OTP) | ✅ | Per spec §12 |
-| Aurora PostgreSQL Serverless v2 | ✅ | All relational data |
-| Redis (ElastiCache Serverless) | ✅ | Sessions, OTP, rate limits |
-| S3 lab report storage + presigned upload | ✅ | File upload per P-03 |
-| Virus scan Lambda | ✅ | Security requirement |
-| SES email notifications | ✅ | Replace email loop |
-| SQS + SMS Lambda (MSG91/Twilio) | ✅ | MVP reminder channel |
-| SQS + WhatsApp Lambda (Meta API) | ✅ | MVP reminder channel |
-| EventBridge Scheduler + MilestoneEvaluator | ✅ | Core milestone automation |
-| DynamoDB audit tables | ✅ | Audit trail |
-| PDF export Lambda | ✅ | R-01 export |
-| WebSocket (in-app notifications ✳️ + chat) | ✅ | Real-time doctor alert + chat transport |
-| 🆕 Chat Engine — text + image/PDF attachments, patient↔care-team thread | ✅ | Spec §7.8 (MVP subset) |
-| 🆕 Chat — voice notes + internal consult thread + transcription | 🔜 Phase 2 | Spec §13–14 phase split |
-| 🆕 Care Team authorization (co-managing / consulting grants) | ✅ | Spec §7.9.2 |
-| 🆕 Primary case transfer (with accept + admin force) | ✅ | Spec §7.9.3 |
-| 🆕 Hospital Registry + doctor affiliations + Virtual Hospital | ✅ | Spec §7.0 (v1.7) |
-| 🆕 Engagement-level hospital association on follow-up rows | ✅ | Spec §7.2 (required field) |
-| 🆕 Hospital-filtered doctor dashboard | ✅ | Spec D-13 |
-| 🆕 Per-hospital reporting | 🔜 Phase 2 | Spec R-04 |
-| CDK IaC + CodePipeline | ✅ | Deployment automation |
-| CloudWatch alarms | ✅ | Operational visibility |
-| Trend graphs / push notifications | 🔜 Phase 2 | |
-| EHR/LIS integration | 🔜 Phase 3 | |
-| OCR from lab PDFs | 🔜 Phase 3 | |
+| Component                                                                | MVP Required | Notes                                   |
+| ------------------------------------------------------------------------ | ------------ | --------------------------------------- |
+| React SPA on S3 + CloudFront                                             | ✅           | Patient + Doctor portals                |
+| API Gateway + Core Lambdas                                               | ✅           | All clinical CRUD                       |
+| Auth Lambda (Google + X + SMS OTP)                                       | ✅           | Per spec §12                            |
+| Aurora PostgreSQL Serverless v2                                          | ✅           | All relational data                     |
+| Redis (ElastiCache Serverless)                                           | ✅           | Sessions, OTP, rate limits              |
+| S3 lab report storage + presigned upload                                 | ✅           | File upload per P-03                    |
+| Virus scan Lambda                                                        | ✅           | Security requirement                    |
+| SES email notifications                                                  | ✅           | Replace email loop                      |
+| SQS + SMS Lambda (MSG91/Twilio)                                          | ✅           | MVP reminder channel                    |
+| SQS + WhatsApp Lambda (Meta API)                                         | ✅           | MVP reminder channel                    |
+| EventBridge Scheduler + MilestoneEvaluator                               | ✅           | Core milestone automation               |
+| DynamoDB audit tables                                                    | ✅           | Audit trail                             |
+| PDF export Lambda                                                        | ✅           | R-01 export                             |
+| WebSocket (in-app notifications ✳️ + chat)                               | ✅           | Real-time doctor alert + chat transport |
+| 🆕 Chat Engine — text + image/PDF attachments, patient↔care-team thread | ✅           | Spec §7.8 (MVP subset)                  |
+| 🆕 Chat — voice notes + internal consult thread + transcription          | 🔜 Phase 2   | Spec §13–14 phase split                 |
+| 🆕 Care Team authorization (co-managing / consulting grants)             | ✅           | Spec §7.9.2                             |
+| 🆕 Primary case transfer (with accept + admin force)                     | ✅           | Spec §7.9.3                             |
+| 🆕 Hospital Registry + doctor affiliations + Virtual Hospital            | ✅           | Spec §7.0 (v1.7)                        |
+| 🆕 Engagement-level hospital association on follow-up rows               | ✅           | Spec §7.2 (required field)              |
+| 🆕 Hospital-filtered doctor dashboard                                    | ✅           | Spec D-13                               |
+| 🆕 Per-hospital reporting                                                | 🔜 Phase 2   | Spec R-04                               |
+| CDK IaC + CodePipeline                                                   | ✅           | Deployment automation                   |
+| CloudWatch alarms                                                        | ✅           | Operational visibility                  |
+| Trend graphs / push notifications                                        | 🔜 Phase 2   |                                         |
+| EHR/LIS integration                                                      | 🔜 Phase 3   |                                         |
+| OCR from lab PDFs                                                        | 🔜 Phase 3   |                                         |
 
 ---
 
 ## 13. Open Architecture Questions (Mapped to Spec §17)
 
-| Spec Q# | Architecture impact |
-|---------|-------------------|
-| Q9 — SMS provider | Determines SMS Lambda integration (MSG91 preferred for India DLT compliance) |
-| Q11 — WhatsApp provider | Determines WhatsApp Lambda integration (Meta Cloud API or Gupshup) |
-| Q5 — WhatsApp templates | Pre-approved template IDs must be configured in Secrets Manager before launch |
-| Q6 — Regulated device | If classified as SaMD in India, data retention and audit requirements may tighten |
-| Q12 — Default protocol | Drives seed data for `follow_up_protocols` table and EventBridge schedule cadence |
-| Q13 — Overdue escalation to doctor | Simple: extend MilestoneEvaluator to enqueue a notification-inapp/email for doctor |
-| ✳️ Q14 — Voice note duration cap | Sets max object size for chat-media bucket + client recorder limit (60/120s) |
-| ✳️ Q15 — Transfer acceptance policy | Chosen model (accept-required + admin force) drives CaseTransferService state machine |
-| ✳️ Q16 — Symptom-concern alerting | If yes, ChatMessageReceived with `symptom_concern` triggers direct SMS/push to on-duty doctor |
+| Spec Q#                                    | Architecture impact                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Q9 — SMS provider                          | Determines SMS Lambda integration (MSG91 preferred for India DLT compliance)                              |
+| Q11 — WhatsApp provider                    | Determines WhatsApp Lambda integration (Meta Cloud API or Gupshup)                                        |
+| Q5 — WhatsApp templates                    | Pre-approved template IDs must be configured in Secrets Manager before launch                             |
+| Q6 — Regulated device                      | If classified as SaMD in India, data retention and audit requirements may tighten                         |
+| Q12 — Default protocol                     | Drives seed data for `follow_up_protocols` table and EventBridge schedule cadence                         |
+| Q13 — Overdue escalation to doctor         | Simple: extend MilestoneEvaluator to enqueue a notification-inapp/email for doctor                        |
+| ✳️ Q14 — Voice note duration cap           | Sets max object size for chat-media bucket + client recorder limit (60/120s)                              |
+| ✳️ Q15 — Transfer acceptance policy        | Chosen model (accept-required + admin force) drives CaseTransferService state machine                     |
+| ✳️ Q16 — Symptom-concern alerting          | If yes, ChatMessageReceived with `symptom_concern` triggers direct SMS/push to on-duty doctor             |
 | 🆕 Q17 — Hospital affiliation self-service | If doctors self-request affiliations, add an approval workflow + status to `hospital_doctor_affiliations` |
-| 🆕 Q18 — Patient-suggested hospitals | If disallowed (recommended), picker stays read-only; no write path from patient to `hospitals` |
-| 🆕 Q19 — Multi-region hospital lists | If multi-city/country, add city/country filters to picker + registry indexes |
-| 🆕 Q20 — Procedure-hospital mutability | Admin-only correction path with audit entry if `procedure_hospital_id` can change |
-| 🆕 Q21 — Legacy row hospital backfill | Migration strategy for pre-v1.7 rows (recommended: default to `VIRTUAL`, admin bulk-update) |
+| 🆕 Q18 — Patient-suggested hospitals       | If disallowed (recommended), picker stays read-only; no write path from patient to `hospitals`            |
+| 🆕 Q19 — Multi-region hospital lists       | If multi-city/country, add city/country filters to picker + registry indexes                              |
+| 🆕 Q20 — Procedure-hospital mutability     | Admin-only correction path with audit entry if `procedure_hospital_id` can change                         |
+| 🆕 Q21 — Legacy row hospital backfill      | Migration strategy for pre-v1.7 rows (recommended: default to `VIRTUAL`, admin bulk-update)               |
 
 ---
 
-*End of HLD document — v2.0, aligned to Application Specification v1.7*
+_End of HLD document — v2.0, aligned to Application Specification v1.7_

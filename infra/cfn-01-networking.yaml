@@ -1,0 +1,563 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  PostOp Care Platform — Networking Layer (Stack 01)
+  Provisions VPC, subnets, IGW, NAT Gateway, route tables, security groups,
+  and VPC endpoints for the post-operative patient care platform in ap-south-1.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Metadata: CloudFormation console grouping and ordering for parameters
+# ──────────────────────────────────────────────────────────────────────────────
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Project Configuration"
+        Parameters:
+          - ProjectName
+          - EnvironmentName
+    ParameterLabels:
+      ProjectName:
+        default: "Project Name"
+      EnvironmentName:
+        default: "Environment Name"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ──────────────────────────────────────────────────────────────────────────────
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: postop-care
+    Description: >
+      Short project identifier used in resource names and export keys.
+      Keep lowercase, no spaces (e.g. postop-care).
+    AllowedPattern: "^[a-z][a-z0-9-]{1,28}[a-z0-9]$"
+    ConstraintDescription: >
+      Must be 3-30 lowercase alphanumeric characters or hyphens,
+      starting and ending with a letter or digit.
+
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: >
+      Deployment environment. Controls tagging and the IsProduction condition.
+      Use 'prod' only for the live clinic environment.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Conditions
+# ──────────────────────────────────────────────────────────────────────────────
+Conditions:
+
+  # IsProduction: true only when EnvironmentName == 'prod'.
+  # Can be used by downstream stacks to enable enhanced monitoring,
+  # deletion protection, multi-AZ RDS, etc.
+  IsProduction: !Equals [!Ref EnvironmentName, prod]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # VPC
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # Main VPC — /16 gives 65 536 IPs, plenty of room for future subnets.
+  # DNS hostnames + DNS resolution are required for RDS endpoints, EFS mounts,
+  # and VPC Interface endpoints to resolve by name inside the VPC.
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true   # assigns public DNS names to EC2/RDS instances
+      EnableDnsSupport: true     # enables the Amazon DNS resolver (169.254.169.253)
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-vpc'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Internet Gateway — required for public subnets to reach the internet
+  # ────────────────────────────────────────────────────────────────────────────
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-igw'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Attach the IGW to the VPC — without this attachment the IGW does nothing.
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Public Subnets — host the NAT Gateway; ALB lives here in later stacks
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # Public subnet in AZ ap-south-1a — NAT Gateway will be deployed here.
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.101.0/24
+      AvailabilityZone: ap-south-1a
+      MapPublicIpOnLaunch: true   # instances launched here get a public IP automatically
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-public-1a'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: public
+
+  # Public subnet in AZ ap-south-1b — second AZ for ALB high availability.
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.102.0/24
+      AvailabilityZone: ap-south-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-public-1b'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: public
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Private Subnets — RDS, ElastiCache Redis, Lambda ENIs live here.
+  # No direct internet access; outbound traffic routes through NAT Gateway.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # Private subnet in AZ ap-south-1a — primary data tier AZ.
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: ap-south-1a
+      MapPublicIpOnLaunch: false  # private subnets never assign public IPs
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-private-1a'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: private
+
+  # Private subnet in AZ ap-south-1b — secondary AZ for RDS Multi-AZ standby
+  # and Lambda redundancy.
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: ap-south-1b
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-private-1b'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: private
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # NAT Gateway — single instance in 1a for cost optimisation at clinic scale.
+  # For prod HA, a second NAT in 1b with its own EIP + route table can be added
+  # behind the IsProduction condition without altering this base template.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # Elastic IP for the NAT Gateway — persists across NAT replacements.
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment   # IGW must be attached before allocating EIP for NAT
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-nat-eip'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # NAT Gateway placed in PublicSubnet1 (ap-south-1a).
+  # All private-subnet outbound traffic (package downloads, third-party API calls)
+  # exits through this gateway. S3 and DynamoDB are exempt via VPC Endpoints.
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-nat-1a'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Route Tables
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # ── Public Route Table ──────────────────────────────────────────────────────
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-public-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Default route: all internet-bound traffic leaves via the IGW.
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate PublicSubnet1 with the public route table.
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  # Associate PublicSubnet2 with the public route table.
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ── Private Route Table ─────────────────────────────────────────────────────
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-private-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Default route: private subnets reach the internet via the NAT Gateway.
+  # S3/DynamoDB traffic is intercepted by VPC Endpoints before hitting this route.
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  # Associate PrivateSubnet1 with the private route table.
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Associate PrivateSubnet2 with the private route table.
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Security Groups
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # ── Lambda Security Group ───────────────────────────────────────────────────
+  # Lambdas are callers, not servers — no inbound rules needed.
+  # Full egress allows Lambdas to reach RDS (5432), Redis (6379),
+  # NAT Gateway (443 for external APIs), and VPC endpoints.
+  LambdaSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${EnvironmentName}-lambda-sg'
+      GroupDescription: >
+        Security group for VPC-attached Lambda functions.
+        No ingress rules — Lambdas initiate all connections outbound.
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1        # -1 = all protocols
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic from Lambda functions
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-lambda-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ── RDS Security Group ──────────────────────────────────────────────────────
+  # Only accepts PostgreSQL connections (port 5432) from LambdaSG.
+  # No egress rules — RDS never initiates outbound connections.
+  RDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${EnvironmentName}-rds-sg'
+      GroupDescription: >
+        Security group for RDS PostgreSQL instance.
+        Allows inbound on 5432 from Lambda SG only. No egress.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSG
+          Description: PostgreSQL access from Lambda functions only
+      # Explicit empty egress overrides the default allow-all egress rule,
+      # ensuring RDS cannot initiate any outbound connections.
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-rds-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ── Redis Security Group ────────────────────────────────────────────────────
+  # Only accepts Redis connections (port 6379) from LambdaSG.
+  # No egress rules — ElastiCache never initiates outbound connections.
+  RedisSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${EnvironmentName}-redis-sg'
+      GroupDescription: >
+        Security group for ElastiCache Redis cluster.
+        Allows inbound on 6379 from Lambda SG only. No egress.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref LambdaSG
+          Description: Redis access from Lambda functions only
+      # Explicit empty egress — Redis nodes should never initiate connections.
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-redis-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ── ALB Security Group ──────────────────────────────────────────────────────
+  # Accepts HTTPS (443) from anywhere on the internet.
+  # Egress is restricted to LambdaSG — the ALB only forwards to Lambda targets.
+  # HTTP (80) is intentionally omitted; redirect HTTP→HTTPS should be handled
+  # at the ALB listener level in the compute stack.
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${EnvironmentName}-alb-sg'
+      GroupDescription: >
+        Security group for the Application Load Balancer.
+        Accepts HTTPS from the internet; egress only to Lambda SG.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from the public internet
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          DestinationSecurityGroupId: !Ref LambdaSG
+          Description: Forward traffic to Lambda functions only
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}-alb-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # VPC Endpoints (Gateway type — no hourly charge, no data processing fee)
+  # Traffic to S3 and DynamoDB stays on the AWS backbone and bypasses the
+  # NAT Gateway entirely, reducing NAT data-processing costs.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  # S3 Gateway Endpoint — used by Lambda for reading/writing patient documents,
+  # pre-signed URL generation, and CloudWatch Logs delivery via S3 export.
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+      # Add the endpoint to both route tables so all subnets benefit.
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      # Policy allows all S3 actions — tighten per-bucket in bucket policies.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:*'
+            Resource:
+              - '*'
+
+  # DynamoDB Gateway Endpoint — used if the platform stores session tokens or
+  # audit logs in DynamoDB; also required for some AWS SDK credential flows.
+  DynamoDBVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 'dynamodb:*'
+            Resource:
+              - '*'
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outputs — exported so downstream stacks (compute, data, monitoring) can
+# import these values using Fn::ImportValue instead of hardcoding IDs.
+# Export names follow the pattern: ${ProjectName}-${EnvironmentName}-<Resource>
+# ──────────────────────────────────────────────────────────────────────────────
+Outputs:
+
+  VpcId:
+    Description: ID of the PostOp Care VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-VpcId'
+
+  VpcCidr:
+    Description: CIDR block of the VPC (useful for SG rules in other stacks)
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-VpcCidr'
+
+  PublicSubnet1Id:
+    Description: Public subnet ID in ap-south-1a (NAT Gateway, ALB)
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PublicSubnet1Id'
+
+  PublicSubnet2Id:
+    Description: Public subnet ID in ap-south-1b (ALB second AZ)
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PublicSubnet2Id'
+
+  PrivateSubnet1Id:
+    Description: Private subnet ID in ap-south-1a (RDS primary, Redis, Lambda)
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PrivateSubnet1Id'
+
+  PrivateSubnet2Id:
+    Description: Private subnet ID in ap-south-1b (RDS standby, Lambda)
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PrivateSubnet2Id'
+
+  LambdaSGId:
+    Description: Security Group ID for VPC-attached Lambda functions
+    Value: !Ref LambdaSG
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-LambdaSGId'
+
+  RDSSGId:
+    Description: Security Group ID for RDS PostgreSQL instance
+    Value: !Ref RDSSG
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-RDSSGId'
+
+  RedisSGId:
+    Description: Security Group ID for ElastiCache Redis cluster
+    Value: !Ref RedisSG
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-RedisSGId'
+
+  ALBSGId:
+    Description: Security Group ID for the Application Load Balancer
+    Value: !Ref ALBSG
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-ALBSGId'
+
+  NatGatewayId:
+    Description: NAT Gateway ID (ap-south-1a)
+    Value: !Ref NatGateway
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-NatGatewayId'
+
+  NatGatewayEIP:
+    Description: Elastic IP address of the NAT Gateway (whitelist this at third-party APIs)
+    Value: !Ref NatGatewayEIP
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-NatGatewayEIP'
+
+  PrivateRouteTableId:
+    Description: Private route table ID (attach new private subnets here)
+    Value: !Ref PrivateRouteTable
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PrivateRouteTableId'
+
+  PublicRouteTableId:
+    Description: Public route table ID (attach new public subnets here)
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-PublicRouteTableId'

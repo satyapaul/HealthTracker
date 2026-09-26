@@ -1,0 +1,590 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  PostOp Care Platform — Database Layer (cfn-02-database)
+  Provisions: KMS CMK, Aurora PostgreSQL Serverless v2 cluster (writer + reader),
+  RDS Proxy, Secrets Manager master & app-user secrets with rotation.
+  Depends on: cfn-01-networking (imports VPC / subnet / SG outputs).
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment tier.
+
+  ProjectName:
+    Type: String
+    Default: postopcare
+    Description: Short project name used as a prefix for resource names and tags.
+
+  NetworkingStackName:
+    Type: String
+    Default: postopcare-networking
+    Description: >
+      Name of the cfn-01-networking CloudFormation stack. Used with
+      !ImportValue to resolve VPC, subnet and security-group IDs.
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  # True only for the production environment — enables deletion protection
+  # and other prod-hardening settings.
+  IsProduction: !Equals [!Ref EnvironmentName, prod]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # 1. KMS Customer-Managed Key (CMK) — Aurora storage encryption
+  # =========================================================================
+  AuroraKMSKey:
+    Type: AWS::KMS::Key
+    # Retain the key even if the stack is deleted to prevent accidental data loss.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub "${ProjectName}-${EnvironmentName} — CMK for Aurora PostgreSQL encryption"
+      EnableKeyRotation: true          # Automatic annual key rotation (AWS-managed rotation)
+      MultiRegion: false               # Single-region key; data residency in ap-south-1
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          # Allow the AWS account root full control (required by KMS)
+          - Sid: EnableRootAccountAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          # Allow RDS service principal to use the key for encryption/decryption
+          - Sid: AllowRDSServiceUse
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: "*"
+          # Allow Secrets Manager to use the CMK for secret encryption
+          - Sid: AllowSecretsManagerUse
+            Effect: Allow
+            Principal:
+              Service: secretsmanager.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+            Resource: "*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  AuroraKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      # Human-readable alias; must start with "alias/"
+      AliasName: !Sub "alias/${ProjectName}-${EnvironmentName}-aurora"
+      TargetKeyId: !Ref AuroraKMSKey
+
+  # =========================================================================
+  # 2. DB Subnet Group — uses private subnets from the networking stack
+  # =========================================================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "${ProjectName}-${EnvironmentName} private subnets for Aurora"
+      # Import subnet IDs exported by cfn-01-networking
+      SubnetIds:
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-PrivateSubnet1Id"
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-PrivateSubnet2Id"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-db-subnet-group"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 3. DB Cluster Parameter Group — aurora-postgresql16 family
+  # =========================================================================
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: !Sub "${ProjectName}-${EnvironmentName} Aurora PostgreSQL 16 cluster params"
+      Family: aurora-postgresql16
+      Parameters:
+        # Set server timezone to Indian Standard Time (IST, UTC+5:30)
+        timezone: Asia/Kolkata
+        # Log connections and disconnections for PHI audit trail
+        log_connections: "1"
+        log_disconnections: "1"
+        # Log statements that take more than 1 second (tunable per env)
+        log_min_duration_statement: "1000"
+        # Force SSL for all connections (no plain-text DB traffic)
+        rds.force_ssl: "1"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 4. Secrets Manager — Master DB credentials (auto-generated)
+  # =========================================================================
+  DBMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    # Do NOT delete the secret when the stack is deleted in prod;
+    # use Retain to protect patient data access credentials.
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    Properties:
+      Name: !Sub "/${ProjectName}/${EnvironmentName}/db/master"
+      Description: !Sub "Aurora master credentials for ${ProjectName} ${EnvironmentName}"
+      # Encrypt the secret with our CMK rather than the default AWS-managed key
+      KmsKeyId: !Ref AuroraKMSKey
+      GenerateSecretString:
+        # AWS will substitute this username into the RDS cluster MasterUsername
+        SecretStringTemplate: '{"username": "postopcare_master"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'   # Characters disallowed in PostgreSQL passwords
+        ExcludePunctuation: false
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 5. Secrets Manager — App DB user credentials (static username)
+  # =========================================================================
+  AppDBSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    Properties:
+      Name: !Sub "/${ProjectName}/${EnvironmentName}/db/app-user"
+      Description: >
+        Application-layer DB user credentials. The postopcare_app role has
+        SELECT/INSERT/UPDATE/DELETE on application schemas only (least privilege).
+      KmsKeyId: !Ref AuroraKMSKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "postopcare_app"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+        ExcludePunctuation: false
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 6. Aurora PostgreSQL Serverless v2 Cluster
+  # =========================================================================
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    # Prevent accidental deletion of the cluster resource itself (independent of DeletionProtection)
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    # Declare explicit dependency so the secret exists before the cluster references it
+    DependsOn:
+      - DBMasterSecret
+      - DBClusterParameterGroup
+      - DBSubnetGroup
+    Properties:
+      # ---- Identity -------------------------------------------------------
+      DBClusterIdentifier: !Sub "${ProjectName}-${EnvironmentName}-cluster"
+
+      # ---- Engine ---------------------------------------------------------
+      Engine: aurora-postgresql
+      EngineVersion: "16.4"
+      EngineMode: provisioned          # Serverless v2 uses EngineMode: provisioned
+
+      # ---- Serverless v2 Scaling ------------------------------------------
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5               # Scale to near-zero during idle periods
+        MaxCapacity: 16                # 16 ACUs ≈ 32 GB RAM; adjust for prod load
+
+      # ---- Parameter Group ------------------------------------------------
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+
+      # ---- Networking -----------------------------------------------------
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        # Import the RDS security group created by cfn-01-networking
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-RDSSGId"
+
+      # ---- Credentials (pulled from Secrets Manager) ----------------------
+      MasterUsername: !Sub
+        - "{{resolve:secretsmanager:${SecretId}:SecretString:username}}"
+        - SecretId: !Ref DBMasterSecret
+      MasterUserPassword: !Sub
+        - "{{resolve:secretsmanager:${SecretId}:SecretString:password}}"
+        - SecretId: !Ref DBMasterSecret
+
+      # ---- Encryption -----------------------------------------------------
+      StorageEncrypted: true
+      KmsKeyId: !Ref AuroraKMSKey
+
+      # ---- Backup & Retention ---------------------------------------------
+      BackupRetentionPeriod: 35        # Maximum Aurora retention; satisfies healthcare audit requirements
+      PreferredBackupWindow: "18:30-19:00"     # 00:00–00:30 IST (off-peak)
+      PreferredMaintenanceWindow: "sat:19:30-sat:20:00"  # Saturday 01:00–01:30 IST
+
+      # ---- High Availability ----------------------------------------------
+      # Multi-AZ is achieved by placing writer and reader in separate AZs (see instances below)
+      # No need to set AvailabilityZones at cluster level for Serverless v2
+
+      # ---- Logging --------------------------------------------------------
+      # Ship PostgreSQL logs to CloudWatch Logs for audit and anomaly detection
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+      # ---- Protection & Compliance ----------------------------------------
+      DeletionProtection: !If [IsProduction, true, false]
+      # Copy backup tags to automated snapshots for cost-allocation tracking
+      CopyTagsToSnapshot: true
+
+      # ---- Misc -----------------------------------------------------------
+      # Disable minor version auto-upgrade in prod; control upgrades via pipeline
+      AutoMinorVersionUpgrade: !If [IsProduction, false, true]
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-cluster"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 7. DB Instance — Writer (AZ-a)
+  # =========================================================================
+  AuroraWriterInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-${EnvironmentName}-writer"
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless    # Required class for Serverless v2 instances
+      Engine: aurora-postgresql
+      # Place writer in the first private subnet AZ
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs !Ref AWS::Region
+      PubliclyAccessible: false         # Never expose DB instances directly
+      AutoMinorVersionUpgrade: !If [IsProduction, false, true]
+      EnablePerformanceInsights: true   # Performance Insights for query-level diagnostics
+      PerformanceInsightsRetentionPeriod: 7   # 7-day free tier; increase to 731 for paid retention
+      PerformanceInsightsKMSKeyId: !Ref AuroraKMSKey
+      MonitoringInterval: 60            # Enhanced Monitoring every 60 seconds
+      MonitoringRoleArn: !GetAtt RDSEnhancedMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-writer"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Role
+          Value: writer
+
+  # =========================================================================
+  # 8. DB Instance — Reader (AZ-b, Multi-AZ read replica)
+  # =========================================================================
+  AuroraReaderInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    # Reader must be created after the writer to avoid race conditions
+    DependsOn: AuroraWriterInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-${EnvironmentName}-reader"
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      # Place reader in the second private subnet AZ for Multi-AZ resilience
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs !Ref AWS::Region
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: !If [IsProduction, false, true]
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      PerformanceInsightsKMSKeyId: !Ref AuroraKMSKey
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSEnhancedMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-reader"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Role
+          Value: reader
+
+  # =========================================================================
+  # 9. IAM Role — RDS Enhanced Monitoring
+  # =========================================================================
+  RDSEnhancedMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-rds-monitoring-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      # AWS-managed policy that grants the monitoring agent permission to
+      # publish OS-level metrics to CloudWatch Logs
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 10. IAM Role — RDS Proxy (Secrets Manager access)
+  # =========================================================================
+  RDSProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-rds-proxy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RDSProxySecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow Proxy to retrieve the master secret to authenticate with Aurora
+              - Sid: GetMasterSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Ref DBMasterSecret
+              # Allow Proxy to decrypt the secret with the CMK
+              - Sid: DecryptWithCMK
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !GetAtt AuroraKMSKey.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 11. RDS Proxy
+  # =========================================================================
+  RDSProxy:
+    Type: AWS::RDS::DBProxy
+    DependsOn:
+      - AuroraWriterInstance   # Cluster must have at least one instance before proxy can target it
+      - AuroraReaderInstance
+    Properties:
+      DBProxyName: !Sub "${ProjectName}-${EnvironmentName}-proxy"
+      EngineFamily: POSTGRESQL
+      RoleArn: !GetAtt RDSProxyRole.Arn
+      # Proxy authenticates to Aurora using the master Secrets Manager secret (not IAM auth)
+      Auth:
+        - AuthScheme: SECRETS
+          IAMAuth: DISABLED            # Use Secrets Manager credentials, not IAM database auth
+          SecretArn: !Ref DBMasterSecret
+      # Place the proxy in private subnets — same as the cluster
+      VpcSubnetIds:
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-PrivateSubnet1Id"
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-PrivateSubnet2Id"
+      VpcSecurityGroupIds:
+        - !ImportValue
+            Fn::Sub: "${NetworkingStackName}-RDSSGId"
+      # Connection pool settings
+      IdleClientTimeout: 1800          # Close idle client connections after 30 minutes
+      RequireTLS: true                 # Force TLS for all client→proxy connections
+      DebugLogging: !If [IsProduction, false, true]   # Enable verbose proxy logging in non-prod
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =========================================================================
+  # 12. RDS Proxy Target Group (routes proxy connections to the Aurora cluster)
+  # =========================================================================
+  RDSProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref RDSProxy
+      TargetGroupName: default          # "default" is the only allowed value
+      DBClusterIdentifiers:
+        - !Ref AuroraCluster
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 90       # Proxy may use up to 90% of max DB connections
+        MaxIdleConnectionsPercent: 50   # Keep up to 50% of connections idle in pool
+        ConnectionBorrowTimeout: 120    # Wait up to 120 s before returning "connection unavailable"
+
+  # =========================================================================
+  # 13. Secrets Manager — Attach secret to cluster (enables rotation Lambda)
+  # =========================================================================
+  DBMasterSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    # This resource links the secret to the RDS cluster so that the
+    # rotation Lambda receives the correct connection metadata.
+    DependsOn: AuroraCluster
+    Properties:
+      SecretId: !Ref DBMasterSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+  # =========================================================================
+  # 14. Secrets Manager Rotation — Master secret (30-day rotation cycle)
+  # =========================================================================
+  DBMasterSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    # Rotation can only be configured after the secret is attached to the cluster
+    DependsOn: DBMasterSecretAttachment
+    Properties:
+      SecretId: !Ref DBMasterSecret
+      # Use the AWS-provided single-user rotation Lambda for Aurora PostgreSQL.
+      # The Lambda ARN follows the pattern:
+      #   arn:aws:lambda:<region>:<account>:function:SecretsManagerRDSPostgreSQLRotationSingleUser
+      # We reference it via the hosted rotation configuration which auto-provisions
+      # the Lambda in the account if it does not already exist.
+      HostedRotationLambda:
+        RotationType: PostgreSQLSingleUser
+        RotationLambdaName: !Sub "${ProjectName}-${EnvironmentName}-master-secret-rotation"
+        # Lambda must run inside the VPC to reach the Aurora cluster endpoint
+        VpcSecurityGroupIds: !ImportValue
+          Fn::Sub: "${NetworkingStackName}-RDSSGId"
+        VpcSubnetIds: !Sub
+          - "${Subnet1},${Subnet2}"
+          - Subnet1: !ImportValue
+              Fn::Sub: "${NetworkingStackName}-PrivateSubnet1Id"
+            Subnet2: !ImportValue
+              Fn::Sub: "${NetworkingStackName}-PrivateSubnet2Id"
+      RotationRules:
+        AutomaticallyAfterDays: 30     # Rotate every 30 days; satisfies HIPAA/PHI key hygiene
+
+  # =========================================================================
+  # 15. Secrets Manager Rotation — App user secret (30-day rotation cycle)
+  # =========================================================================
+  AppDBSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    DependsOn: AuroraCluster
+    Properties:
+      SecretId: !Ref AppDBSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+  AppDBSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    DependsOn: AppDBSecretAttachment
+    Properties:
+      SecretId: !Ref AppDBSecret
+      HostedRotationLambda:
+        RotationType: PostgreSQLSingleUser
+        RotationLambdaName: !Sub "${ProjectName}-${EnvironmentName}-appuser-secret-rotation"
+        VpcSecurityGroupIds: !ImportValue
+          Fn::Sub: "${NetworkingStackName}-RDSSGId"
+        VpcSubnetIds: !Sub
+          - "${Subnet1},${Subnet2}"
+          - Subnet1: !ImportValue
+              Fn::Sub: "${NetworkingStackName}-PrivateSubnet1Id"
+            Subnet2: !ImportValue
+              Fn::Sub: "${NetworkingStackName}-PrivateSubnet2Id"
+      RotationRules:
+        AutomaticallyAfterDays: 30
+
+# ---------------------------------------------------------------------------
+# Outputs — exported for consumption by downstream stacks (app, compute)
+# ---------------------------------------------------------------------------
+Outputs:
+
+  ClusterEndpoint:
+    Description: Aurora cluster writer endpoint (use for DDL / migrations)
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterEndpoint"
+
+  ClusterReaderEndpoint:
+    Description: Aurora cluster reader endpoint (load-balanced across read replicas)
+    Value: !GetAtt AuroraCluster.ReadEndpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterReaderEndpoint"
+
+  ClusterPort:
+    Description: Aurora cluster port (PostgreSQL default 5432)
+    Value: !GetAtt AuroraCluster.Endpoint.Port
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterPort"
+
+  ProxyEndpoint:
+    Description: RDS Proxy endpoint — use this for all application connections
+    Value: !GetAtt RDSProxy.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-ProxyEndpoint"
+
+  DBSecretArn:
+    Description: ARN of the Aurora master credentials secret in Secrets Manager
+    Value: !Ref DBMasterSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-DBSecretArn"
+
+  AppDBSecretArn:
+    Description: ARN of the postopcare_app user credentials secret in Secrets Manager
+    Value: !Ref AppDBSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-AppDBSecretArn"
+
+  KMSKeyArn:
+    Description: ARN of the KMS CMK used to encrypt Aurora storage and secrets
+    Value: !GetAtt AuroraKMSKey.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-KMSKeyArn"
+
+  KMSKeyId:
+    Description: Key ID of the KMS CMK (useful for IAM policy conditions)
+    Value: !Ref AuroraKMSKey
+    Export:
+      Name: !Sub "${AWS::StackName}-KMSKeyId"
+
+  AuroraClusterIdentifier:
+    Description: Aurora cluster identifier (for use in monitoring alarms and scripts)
+    Value: !Ref AuroraCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-AuroraClusterIdentifier"

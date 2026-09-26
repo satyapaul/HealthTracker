@@ -1,0 +1,819 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  PostOp Care Platform — Stack 06: Messaging
+  Creates the SQS FIFO notification queues (in-app, email, SMS, WhatsApp),
+  their Dead Letter Queues, a shared KMS CMK for queue encryption, CloudWatch
+  alarms on every DLQ, an SNS ops-alert topic, and EventBridge Scheduler
+  resources (scheduler group, two schedules, IAM role) for the
+  MilestoneEvaluator Lambda.
+
+  Deployment order: this stack must deploy BEFORE the compute stack, which
+  is why MilestoneEvaluatorLambdaArn is accepted as an input parameter
+  rather than imported via cross-stack reference.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    Description: Deployment environment (e.g. dev, staging, prod).
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    ConstraintDescription: Must be one of dev, staging, or prod.
+
+  ProjectName:
+    Type: String
+    Default: postopcare
+    Description: Short project name used as a prefix in resource names and tags.
+    AllowedPattern: "[a-z][a-z0-9-]*"
+    ConstraintDescription: Lowercase alphanumeric characters and hyphens only.
+
+  OpsAlertEmail:
+    Type: String
+    Default: ops-placeholder@example.com
+    Description: >
+      Email address that receives CloudWatch alarm notifications via SNS.
+      Replace with a real address before deploying to production.
+    AllowedPattern: ".+@.+"
+    ConstraintDescription: Must be a valid email address.
+
+  MilestoneEvaluatorLambdaArn:
+    Type: String
+    Description: >
+      Full ARN of the MilestoneEvaluator Lambda function deployed by the
+      compute stack. Provided as a parameter because messaging deploys before
+      compute. Example:
+      arn:aws:lambda:ap-south-1:123456789012:function:postopcare-MilestoneEvaluator-prod
+    AllowedPattern: "arn:aws:lambda:[a-z0-9-]+:[0-9]{12}:function:.+"
+    ConstraintDescription: Must be a valid Lambda function ARN.
+
+# ---------------------------------------------------------------------------
+# Metadata — Parameter grouping for CloudFormation console
+# ---------------------------------------------------------------------------
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Environment"
+        Parameters:
+          - EnvironmentName
+          - ProjectName
+      - Label:
+          default: "Operations"
+        Parameters:
+          - OpsAlertEmail
+      - Label:
+          default: "Compute Integration"
+        Parameters:
+          - MilestoneEvaluatorLambdaArn
+    ParameterLabels:
+      EnvironmentName:
+        default: "Environment Name"
+      ProjectName:
+        default: "Project Name"
+      OpsAlertEmail:
+        default: "Ops Alert Email"
+      MilestoneEvaluatorLambdaArn:
+        default: "MilestoneEvaluator Lambda ARN"
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # =========================================================================
+  # KMS — Customer-Managed Key for SQS queue encryption
+  # =========================================================================
+
+  # CMK used to encrypt all SQS FIFO queues and their DLQs.
+  # Key rotation is enabled so AWS automatically rotates the backing key
+  # material every year without changing the key ID/ARN (transparent to apps).
+  SqsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "CMK for SQS FIFO queue encryption — ${ProjectName} ${EnvironmentName}"
+      EnableKeyRotation: true   # Annual automatic key rotation (HIPAA/security best practice)
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          # Root account gets full key management rights; prevents lockout.
+          - Sid: AllowRootAccountFullControl
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+          # SQS service needs these permissions to use the CMK when
+          # it encrypts/decrypts queue messages on behalf of producers
+          # and consumers.
+          - Sid: AllowSqsServiceUse
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+
+          # SNS service needs to be able to send encrypted messages to SQS
+          # when cross-service message routing is used.
+          - Sid: AllowSnsPublishToEncryptedSqs
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+
+          # CloudWatch Alarms service principal — needed to publish alarm
+          # state-change messages to the encrypted SNS topic.
+          - Sid: AllowCloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+
+  # Human-readable alias for the CMK (visible in KMS console).
+  SqsKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-sqs-${EnvironmentName}"
+      TargetKeyId: !Ref SqsKmsKey
+
+  # =========================================================================
+  # SNS — Operations Alert Topic
+  # =========================================================================
+
+  # All CloudWatch DLQ alarms publish to this topic.
+  # The email subscription is a placeholder — replace OpsAlertEmail parameter
+  # with a real distribution list before going to production.
+  # Additional subscriptions (PagerDuty webhook, Slack via Lambda, etc.)
+  # can be added without modifying this template.
+  OpsAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-ops-alerts-${EnvironmentName}"
+      DisplayName: !Sub "PostOp Care Ops Alerts (${EnvironmentName})"
+      # Encrypt the SNS topic at rest using the same CMK.
+      KmsMasterKeyId: !Ref SqsKmsKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Placeholder email subscription — subscriber must confirm the
+  # subscription via the confirmation email sent by SNS.
+  OpsAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OpsAlertTopic
+      Protocol: email
+      Endpoint: !Ref OpsAlertEmail
+
+  # =========================================================================
+  # SQS — In-App Notification Queue
+  # =========================================================================
+
+  # Dead Letter Queue for in-app notifications.
+  # Messages that fail 3 processing attempts land here for investigation.
+  # Retention: 7 days gives the ops team a full week to diagnose and replay.
+  NotificationInAppDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      # FIFO DLQ must match the source queue type (FIFO).
+      QueueName: !Sub "notification-inapp-dlq-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false   # Explicit deduplication IDs used throughout
+      # 7-day retention — long enough to diagnose, short enough to limit cost.
+      MessageRetentionPeriod: 604800
+      # Encrypt with CMK — PHI-adjacent data must be protected at rest.
+      KmsMasterKeyId: !Ref SqsKmsKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: dlq
+        - Key: Channel
+          Value: inapp
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Main in-app notification queue.
+  # In-app notifications are ephemeral — 1-day retention is intentional
+  # because a 24h-old push notification is no longer useful to the user.
+  # ContentBasedDeduplication=false: the application provides explicit
+  # MessageDeduplicationId = milestoneId + reminderType, satisfying
+  # spec requirement M-09 (no duplicate reminders).
+  NotificationInAppQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-inapp-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false   # App must supply deduplication IDs explicitly
+      MessageRetentionPeriod: 86400      # 1 day — stale in-app alerts are discarded
+      VisibilityTimeout: 60              # Consumer Lambda has 60 s to process + delete
+      KmsMasterKeyId: !Ref SqsKmsKey
+      RedrivePolicy:
+        maxReceiveCount: 3               # After 3 failed attempts → DLQ
+        deadLetterTargetArn: !GetAtt NotificationInAppDLQ.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: main
+        - Key: Channel
+          Value: inapp
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # SQS — Email Notification Queue
+  # =========================================================================
+
+  # DLQ for email channel.
+  NotificationEmailDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-email-dlq-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 604800    # 7 days
+      KmsMasterKeyId: !Ref SqsKmsKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: dlq
+        - Key: Channel
+          Value: email
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Email queue — 4-day retention aligns with SES delivery retry window.
+  # Email is more tolerant of latency than SMS; 60 s VisibilityTimeout
+  # gives the SES-calling Lambda enough time to handle soft bounces.
+  NotificationEmailQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-email-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 345600    # 4 days
+      VisibilityTimeout: 60
+      KmsMasterKeyId: !Ref SqsKmsKey
+      RedrivePolicy:
+        maxReceiveCount: 3
+        deadLetterTargetArn: !GetAtt NotificationEmailDLQ.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: main
+        - Key: Channel
+          Value: email
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # SQS — SMS Notification Queue
+  # =========================================================================
+
+  # DLQ for SMS channel.
+  NotificationSmsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-sms-dlq-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 604800    # 7 days
+      KmsMasterKeyId: !Ref SqsKmsKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: dlq
+        - Key: Channel
+          Value: sms
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # SMS queue — 4-day retention; SMS delivery via MSG91/Twilio should
+  # complete within minutes, but retaining messages for 4 days handles
+  # provider outages gracefully.
+  NotificationSmsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-sms-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 345600    # 4 days
+      VisibilityTimeout: 60
+      KmsMasterKeyId: !Ref SqsKmsKey
+      RedrivePolicy:
+        maxReceiveCount: 3
+        deadLetterTargetArn: !GetAtt NotificationSmsDLQ.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: main
+        - Key: Channel
+          Value: sms
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # SQS — WhatsApp Notification Queue
+  # =========================================================================
+
+  # DLQ for WhatsApp channel.
+  NotificationWhatsAppDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-whatsapp-dlq-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 604800    # 7 days
+      KmsMasterKeyId: !Ref SqsKmsKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: dlq
+        - Key: Channel
+          Value: whatsapp
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # WhatsApp queue — 4-day retention mirrors the email queue.
+  # Meta's Cloud API typically delivers within seconds but can have
+  # temporary API outages; 4 days prevents message loss during incidents.
+  NotificationWhatsAppQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "notification-whatsapp-${EnvironmentName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 345600    # 4 days
+      VisibilityTimeout: 60
+      KmsMasterKeyId: !Ref SqsKmsKey
+      RedrivePolicy:
+        maxReceiveCount: 3
+        deadLetterTargetArn: !GetAtt NotificationWhatsAppDLQ.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: main
+        - Key: Channel
+          Value: whatsapp
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # CloudWatch Alarms — DLQ depth monitors
+  # Each alarm triggers when ANY message appears in a DLQ, indicating a
+  # consumer failure that needs immediate ops attention.
+  # =========================================================================
+
+  # ---- In-App DLQ alarm ----
+  AlarmInAppDLQ:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-inapp-dlq-nonempty-${EnvironmentName}"
+      AlarmDescription: >
+        One or more in-app notification messages have failed delivery 3 times
+        and landed in the DLQ. Investigate the InApp consumer Lambda logs.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationInAppDLQ.QueueName
+      Statistic: Sum
+      Period: 60            # Evaluate every 60 seconds
+      EvaluationPeriods: 1  # Alert on first occurrence (no grace period)
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching   # Empty queue during quiescent periods is normal
+      AlarmActions:
+        - !Ref OpsAlertTopic
+      OKActions:
+        - !Ref OpsAlertTopic   # Send recovery notification when DLQ drains
+
+  # ---- Email DLQ alarm ----
+  AlarmEmailDLQ:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-email-dlq-nonempty-${EnvironmentName}"
+      AlarmDescription: >
+        One or more email notification messages have failed delivery 3 times
+        and landed in the DLQ. Investigate the Email consumer Lambda / SES config.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationEmailDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OpsAlertTopic
+      OKActions:
+        - !Ref OpsAlertTopic
+
+  # ---- SMS DLQ alarm ----
+  AlarmSmsDLQ:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-sms-dlq-nonempty-${EnvironmentName}"
+      AlarmDescription: >
+        One or more SMS messages have failed delivery 3 times and landed in the
+        DLQ. Investigate the SMS consumer Lambda and MSG91/Twilio integration.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationSmsDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OpsAlertTopic
+      OKActions:
+        - !Ref OpsAlertTopic
+
+  # ---- WhatsApp DLQ alarm ----
+  AlarmWhatsAppDLQ:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-whatsapp-dlq-nonempty-${EnvironmentName}"
+      AlarmDescription: >
+        One or more WhatsApp messages have failed delivery 3 times and landed in
+        the DLQ. Investigate the WhatsApp consumer Lambda and Meta Cloud API
+        integration.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationWhatsAppDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OpsAlertTopic
+      OKActions:
+        - !Ref OpsAlertTopic
+
+  # =========================================================================
+  # IAM — EventBridge Scheduler execution role
+  # =========================================================================
+
+  # This role is assumed by the EventBridge Scheduler service to invoke the
+  # MilestoneEvaluator Lambda function on behalf of the schedules defined below.
+  # Scope is intentionally narrow: only lambda:InvokeFunction on the single
+  # target Lambda ARN.
+  SchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-scheduler-role-${EnvironmentName}"
+      Description: >
+        Allows EventBridge Scheduler to invoke the MilestoneEvaluator Lambda
+        for the PostOp Care milestone reminder pipeline.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSchedulerAssumeRole
+            Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            # Condition restricts role assumption to schedules created within
+            # this account, preventing confused-deputy attacks.
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: InvokeMilestoneEvaluatorLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowLambdaInvoke
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                # Grant access only to the specific Lambda ARN provided.
+                # This also covers qualified ARN aliases/versions that start
+                # with the same base ARN.
+                Resource:
+                  - !Ref MilestoneEvaluatorLambdaArn
+                  - !Sub "${MilestoneEvaluatorLambdaArn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # EventBridge Scheduler — Scheduler Group
+  # =========================================================================
+
+  # All PostOp Care schedules are grouped for isolation and easier management
+  # (console filtering, IAM conditions, deletion as a unit).
+  MilestoneSchedulerGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =========================================================================
+  # EventBridge Schedules
+  # =========================================================================
+
+  # ---- Schedule 1: Daily milestone check ----
+  # Fires at 02:30 UTC = 08:00 IST (accounting for India's UTC+5:30 offset).
+  # A flexible window of 15 minutes lets AWS batch executions across accounts
+  # and reduces throttling, while still ensuring the Lambda runs in the early
+  # morning before doctors start their day.
+  #
+  # Payload: {"scope": "48h"}
+  # The Lambda queries milestones due within the next 48 hours and enqueues
+  # reminder messages to the SQS notification queues.
+  DailyMilestoneCheckSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "daily-milestone-check-${EnvironmentName}"
+      GroupName: !Ref MilestoneSchedulerGroup
+      Description: >
+        Daily at 08:00 IST (02:30 UTC). Evaluates milestones due within the
+        next 48 hours and enqueues reminder notifications. Flexible window of
+        15 min allows AWS to spread execution load.
+      # cron(Minutes Hours Day-of-month Month Day-of-week Year)
+      # ? in Day-of-month means "no specific value" (required when Day-of-week is specified)
+      ScheduleExpression: "cron(30 2 * * ? *)"
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow:
+        Mode: FLEXIBLE
+        MaximumWindowInMinutes: 15    # Run any time within a 15-min window after 02:30 UTC
+      State: ENABLED
+      Target:
+        Arn: !Ref MilestoneEvaluatorLambdaArn
+        RoleArn: !GetAtt SchedulerExecutionRole.Arn
+        # Input is a JSON string; the Lambda receives this as its event payload.
+        Input: '{"scope": "48h"}'
+        # RetryPolicy: retry up to 2 additional times on Lambda errors with
+        # exponential backoff, maximum 1 hour total retry window.
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 3600
+
+  # ---- Schedule 2: Hourly same-day check ----
+  # Fires at the top of every hour. Handles same-day reminders that need to
+  # be sent close to the actual due time (e.g., "your appointment is in 2 hours").
+  # Flexible window of 5 minutes — tighter than the daily job because
+  # same-day accuracy matters more.
+  #
+  # Payload: {"scope": "same-day"}
+  # The Lambda restricts its query to milestones due on the current calendar
+  # day to avoid re-processing items already handled by the daily job.
+  HourlySameDayCheckSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "hourly-same-day-check-${EnvironmentName}"
+      GroupName: !Ref MilestoneSchedulerGroup
+      Description: >
+        Hourly at :00. Evaluates same-day milestones and enqueues close-in-time
+        reminder notifications. Flexible window of 5 min maintains near-real-time
+        accuracy for same-day reminders.
+      # cron(0 * * * ? *) fires at minute 0 of every hour, every day.
+      ScheduleExpression: "cron(0 * * * ? *)"
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow:
+        Mode: FLEXIBLE
+        MaximumWindowInMinutes: 5
+      State: ENABLED
+      Target:
+        Arn: !Ref MilestoneEvaluatorLambdaArn
+        RoleArn: !GetAtt SchedulerExecutionRole.Arn
+        Input: '{"scope": "same-day"}'
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 3600
+
+# ---------------------------------------------------------------------------
+# Outputs — exported for cross-stack references and operational visibility
+# ---------------------------------------------------------------------------
+Outputs:
+
+  # ---------- KMS ----------
+  SqsKmsKeyId:
+    Description: ID of the KMS CMK used to encrypt SQS queues.
+    Value: !Ref SqsKmsKey
+    Export:
+      Name: !Sub "${AWS::StackName}-SqsKmsKeyId"
+
+  SqsKmsKeyArn:
+    Description: ARN of the KMS CMK used to encrypt SQS queues.
+    Value: !GetAtt SqsKmsKey.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SqsKmsKeyArn"
+
+  # ---------- SNS Alert Topic ----------
+  AlertTopicArn:
+    Description: ARN of the SNS topic that receives CloudWatch DLQ alarm notifications.
+    Value: !Ref OpsAlertTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-AlertTopicArn"
+
+  # ---------- In-App Queue ----------
+  NotificationInAppQueueUrl:
+    Description: URL of the in-app notification FIFO queue.
+    Value: !Ref NotificationInAppQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationInAppQueueUrl"
+
+  NotificationInAppQueueArn:
+    Description: ARN of the in-app notification FIFO queue.
+    Value: !GetAtt NotificationInAppQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationInAppQueueArn"
+
+  NotificationInAppQueueName:
+    Description: Name of the in-app notification FIFO queue.
+    Value: !GetAtt NotificationInAppQueue.QueueName
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationInAppQueueName"
+
+  NotificationInAppDLQArn:
+    Description: ARN of the in-app notification Dead Letter Queue.
+    Value: !GetAtt NotificationInAppDLQ.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationInAppDLQArn"
+
+  NotificationInAppDLQUrl:
+    Description: URL of the in-app notification Dead Letter Queue.
+    Value: !Ref NotificationInAppDLQ
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationInAppDLQUrl"
+
+  # ---------- Email Queue ----------
+  NotificationEmailQueueUrl:
+    Description: URL of the email notification FIFO queue.
+    Value: !Ref NotificationEmailQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationEmailQueueUrl"
+
+  NotificationEmailQueueArn:
+    Description: ARN of the email notification FIFO queue.
+    Value: !GetAtt NotificationEmailQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationEmailQueueArn"
+
+  NotificationEmailQueueName:
+    Description: Name of the email notification FIFO queue.
+    Value: !GetAtt NotificationEmailQueue.QueueName
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationEmailQueueName"
+
+  NotificationEmailDLQArn:
+    Description: ARN of the email notification Dead Letter Queue.
+    Value: !GetAtt NotificationEmailDLQ.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationEmailDLQArn"
+
+  NotificationEmailDLQUrl:
+    Description: URL of the email notification Dead Letter Queue.
+    Value: !Ref NotificationEmailDLQ
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationEmailDLQUrl"
+
+  # ---------- SMS Queue ----------
+  NotificationSmsQueueUrl:
+    Description: URL of the SMS notification FIFO queue.
+    Value: !Ref NotificationSmsQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationSmsQueueUrl"
+
+  NotificationSmsQueueArn:
+    Description: ARN of the SMS notification FIFO queue.
+    Value: !GetAtt NotificationSmsQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationSmsQueueArn"
+
+  NotificationSmsQueueName:
+    Description: Name of the SMS notification FIFO queue.
+    Value: !GetAtt NotificationSmsQueue.QueueName
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationSmsQueueName"
+
+  NotificationSmsDLQArn:
+    Description: ARN of the SMS notification Dead Letter Queue.
+    Value: !GetAtt NotificationSmsDLQ.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationSmsDLQArn"
+
+  NotificationSmsDLQUrl:
+    Description: URL of the SMS notification Dead Letter Queue.
+    Value: !Ref NotificationSmsDLQ
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationSmsDLQUrl"
+
+  # ---------- WhatsApp Queue ----------
+  NotificationWhatsAppQueueUrl:
+    Description: URL of the WhatsApp notification FIFO queue.
+    Value: !Ref NotificationWhatsAppQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationWhatsAppQueueUrl"
+
+  NotificationWhatsAppQueueArn:
+    Description: ARN of the WhatsApp notification FIFO queue.
+    Value: !GetAtt NotificationWhatsAppQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationWhatsAppQueueArn"
+
+  NotificationWhatsAppQueueName:
+    Description: Name of the WhatsApp notification FIFO queue.
+    Value: !GetAtt NotificationWhatsAppQueue.QueueName
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationWhatsAppQueueName"
+
+  NotificationWhatsAppDLQArn:
+    Description: ARN of the WhatsApp notification Dead Letter Queue.
+    Value: !GetAtt NotificationWhatsAppDLQ.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationWhatsAppDLQArn"
+
+  NotificationWhatsAppDLQUrl:
+    Description: URL of the WhatsApp notification Dead Letter Queue.
+    Value: !Ref NotificationWhatsAppDLQ
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationWhatsAppDLQUrl"
+
+  # ---------- EventBridge Scheduler ----------
+  SchedulerGroupName:
+    Description: Name of the EventBridge Scheduler group for PostOp Care schedules.
+    Value: !Ref MilestoneSchedulerGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SchedulerGroupName"
+
+  SchedulerRoleArn:
+    Description: ARN of the IAM role used by EventBridge Scheduler to invoke Lambda.
+    Value: !GetAtt SchedulerExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SchedulerRoleArn"
+
+  DailyMilestoneCheckScheduleName:
+    Description: Name of the daily milestone check EventBridge schedule.
+    Value: !Ref DailyMilestoneCheckSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-DailyMilestoneCheckScheduleName"
+
+  HourlySameDayCheckScheduleName:
+    Description: Name of the hourly same-day check EventBridge schedule.
+    Value: !Ref HourlySameDayCheckSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-HourlySameDayCheckScheduleName"

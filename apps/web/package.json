@@ -1,0 +1,13 @@
+{
+  "name": "@postopcare/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "vitest": "2.1.4"
+  }
+}

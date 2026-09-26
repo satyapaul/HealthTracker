@@ -1,0 +1,15 @@
+node_modules
+dist
+cdk.out
+coverage
+package-lock.json
+*.pdf
+*.png
+*.html
+docs/older-versions
+
+# Legacy hand-written CloudFormation reference templates. These use CFN
+# short-form intrinsics (e.g. nested !Select / !GetAZs / !Ref) that Prettier's
+# YAML parser cannot parse (SyntaxError: a node can have at most one tag).
+# The CDK app in lib/ is the source of truth for infra; leave these untouched.
+infra/cfn-*.yaml

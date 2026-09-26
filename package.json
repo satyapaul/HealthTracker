@@ -1,0 +1,43 @@
+{
+  "name": "postopcare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Post-Operative Investigation Follow-Up Platform — monorepo root",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "workspaces": [
+    "apps/*",
+    "infra"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "synth": "npm run synth --workspace infra",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.13.0",
+    "@types/node": "22.5.0",
+    "eslint": "9.13.0",
+    "husky": "9.1.6",
+    "lint-staged": "15.2.10",
+    "prettier": "3.3.3",
+    "typescript": "5.5.4",
+    "typescript-eslint": "8.11.0",
+    "vitest": "2.1.4"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
+  }
+}

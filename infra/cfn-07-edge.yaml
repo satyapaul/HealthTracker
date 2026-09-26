@@ -1,0 +1,552 @@
+##############################################################################
+# PostOp Care Platform — Edge Layer (CloudFront + WAF + Route53)
+# Stack: cfn-07-edge
+# Template: cfn-07-edge.yaml
+#
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  CRITICAL DEPLOYMENT NOTE — AWS WAF + CloudFront REGION REQUIREMENT ║
+# ╠══════════════════════════════════════════════════════════════════════╣
+# ║  AWS WAF WebACLs with scope=CLOUDFRONT MUST be created in           ║
+# ║  us-east-1 (N. Virginia), regardless of where the CloudFront        ║
+# ║  distribution or other resources are deployed.                      ║
+# ║                                                                      ║
+# ║  OPTIONS:                                                            ║
+# ║  1. (Recommended) Deploy this ENTIRE template in us-east-1.         ║
+# ║     CloudFront is a global service; the distribution itself has      ║
+# ║     no region constraint. Route 53 hosted zone records work from     ║
+# ║     any region. ACM certificates for CloudFront must also be in     ║
+# ║     us-east-1. This is the simplest approach.                       ║
+# ║                                                                      ║
+# ║  2. (Alternative) Split into two stacks:                            ║
+# ║     - cfn-07a-waf.yaml   → deployed in us-east-1 (WAF WebACL only) ║
+# ║     - cfn-07b-edge.yaml  → deployed in ap-south-1 (CloudFront,      ║
+# ║       Route53), importing the WAF ARN from cfn-07a via SSM or       ║
+# ║       cross-stack export.                                            ║
+# ║                                                                      ║
+# ║  This template implements Option 1: deploy all resources in          ║
+# ║  us-east-1. Application data (RDS, Redis, Lambda, SQS) remains      ║
+# ║  in ap-south-1 as required by data-residency policy.                ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+#
+# Dependencies (must be deployed first):
+#   - cfn-01-network.yaml  (VPC, subnets)
+#   - cfn-04-storage.yaml  (S3 assets bucket — exports AssetsBucketName,
+#                           AssetsBucketDomainName)
+#   - cfn-06-api.yaml      (API Gateway — exports ApiGatewayUrl)
+#   - ACM certificate for DomainName must be pre-provisioned in us-east-1
+#     (CloudFront requires the cert in us-east-1 regardless of app region)
+#
+# Outputs exported by this stack:
+#   - ${ProjectName}-${EnvironmentName}-CloudFrontDistributionId
+#   - ${ProjectName}-${EnvironmentName}-CloudFrontDomainName
+#   - ${ProjectName}-${EnvironmentName}-WafWebAclArn
+##############################################################################
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  PostOp Care Platform — Edge layer: WAF WebACL (CloudFront scope),
+  CloudFront Distribution with OAC, S3 access logging, and Route53 alias records.
+  MUST be deployed in us-east-1 (see comment block above).
+
+##############################################################################
+# Parameters
+##############################################################################
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    Description: Deployment environment (dev, staging, prod)
+    AllowedValues: [dev, staging, prod]
+    Default: dev
+
+  ProjectName:
+    Type: String
+    Description: Project identifier used in resource names and export keys
+    Default: postopcare
+
+  DomainName:
+    Type: String
+    Description: >
+      Apex domain for the platform (e.g. postopcare.in).
+      CloudFront will serve both DomainName and www.DomainName.
+    Default: postopcare.in
+
+  AcmCertificateArn:
+    Type: String
+    Description: >
+      ARN of the ACM certificate covering DomainName and www.DomainName.
+      MUST be issued in us-east-1 (CloudFront requirement).
+      Example: arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+  ApiGatewayUrl:
+    Type: String
+    Description: >
+      HTTPS URL of the API Gateway HTTP API (without trailing slash).
+      Imported from cfn-06-api stack output or provided directly.
+      Example: https://abc123.execute-api.ap-south-1.amazonaws.com
+
+  AssetsBucketName:
+    Type: String
+    Description: >
+      Name of the S3 assets bucket (React SPA bundles + static assets).
+      Imported from cfn-04-storage stack output.
+
+  AssetsBucketDomainName:
+    Type: String
+    Description: >
+      Regional domain name of the S3 assets bucket (e.g. bucket.s3.amazonaws.com).
+      Use the S3 regional domain, NOT the website endpoint — OAC requires the REST API endpoint.
+      Imported from cfn-04-storage stack output.
+
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: >
+      Route53 Hosted Zone ID for DomainName.
+      The zone must already exist (created outside this template or imported).
+
+##############################################################################
+# Metadata — parameter grouping for CloudFormation console UX
+##############################################################################
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment
+        Parameters: [EnvironmentName, ProjectName]
+      - Label:
+          default: Domain & TLS
+        Parameters: [DomainName, AcmCertificateArn, HostedZoneId]
+      - Label:
+          default: Origins (imported from upstream stacks)
+        Parameters: [ApiGatewayUrl, AssetsBucketName, AssetsBucketDomainName]
+    ParameterLabels:
+      AcmCertificateArn:
+        default: ACM Certificate ARN (us-east-1)
+      ApiGatewayUrl:
+        default: API Gateway URL
+      AssetsBucketDomainName:
+        default: S3 Assets Bucket Domain Name (regional)
+
+##############################################################################
+# Resources
+##############################################################################
+Resources:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 1. WAF WebACL (scope: CLOUDFRONT)
+  #    Must reside in us-east-1 — enforced by deploying this template there.
+  #    Rules applied in ascending priority order (lower number = evaluated first).
+  # ══════════════════════════════════════════════════════════════════════════
+  WafWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${ProjectName}-waf-${EnvironmentName}'
+      # CLOUDFRONT scope requires the stack to be deployed in us-east-1
+      Scope: CLOUDFRONT
+      Description: !Sub >
+        WAF WebACL for PostOp Care CloudFront distribution — ${EnvironmentName}.
+        Blocks OWASP top-10 via managed rules and rate-limits auth endpoints.
+      DefaultAction:
+        # Allow all traffic by default; individual rules block or count
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        # Metric name must be unique per account+region; keep it descriptive
+        MetricName: !Sub 'postopcare-waf-${EnvironmentName}'
+      Rules:
+
+        # ── Rule 1: AWS Common Rule Set ──────────────────────────────────
+        # Covers OWASP top 10: XSS, path traversal, bad User-Agents, etc.
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            # None = use the managed rule's own action (Block/Count)
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'postopcare-waf-common-${EnvironmentName}'
+
+        # ── Rule 2: Known Bad Inputs ─────────────────────────────────────
+        # Blocks requests that are known attack payloads (Log4j, SSRF, etc.)
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'postopcare-waf-badinputs-${EnvironmentName}'
+
+        # ── Rule 3: SQLi Rule Set ────────────────────────────────────────
+        # Blocks SQL injection attempts — critical for a healthcare DB platform
+        - Name: AWSManagedRulesSQLiRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'postopcare-waf-sqli-${EnvironmentName}'
+
+        # ── Rule 10: Rate limit on /auth/* ───────────────────────────────
+        # 2 000 requests per 5 minutes per source IP on any /auth/ path.
+        # Mitigates credential stuffing and brute-force login attacks.
+        # Note: WAF rate-limit windows are always 5 minutes (300 seconds).
+        - Name: RateLimitAuth
+          Priority: 10
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              # 2 000 req / 5 min / IP
+              Limit: 2000
+              # CONSTANT_IP: rate tracking key is the source IP address
+              AggregateKeyType: IP
+              # Scope-down: only count requests matching /auth/* URI prefix
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: '/auth/'
+                  FieldToMatch:
+                    UriPath: {}
+                  TextTransformations:
+                    - Priority: 0
+                      Type: LOWERCASE
+                  PositionalConstraint: STARTS_WITH
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'postopcare-waf-ratelimit-auth-${EnvironmentName}'
+
+        # ── Rule 11: Rate limit on /auth/otp/* ──────────────────────────
+        # Stricter 500 req / 5 min / IP for OTP endpoints (send + verify).
+        # Must have higher priority number than Rule 10 so it is evaluated
+        # independently; both rules can block the same request if both match,
+        # but the OTP rule kicks in sooner for OTP-specific flood attacks.
+        - Name: RateLimitAuthOtp
+          Priority: 11
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              # 500 req / 5 min / IP — much tighter for OTP paths
+              Limit: 500
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: '/auth/otp/'
+                  FieldToMatch:
+                    UriPath: {}
+                  TextTransformations:
+                    - Priority: 0
+                      Type: LOWERCASE
+                  PositionalConstraint: STARTS_WITH
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'postopcare-waf-ratelimit-otp-${EnvironmentName}'
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 2. CloudFront Origin Access Control (OAC)
+  #    Replaces the legacy Origin Access Identity (OAI). OAC signs requests
+  #    to S3 using SigV4, allowing bucket policy-based access without making
+  #    the bucket public. The S3 bucket policy (in cfn-04-storage) must grant
+  #    s3:GetObject to the CloudFront service principal with a condition on
+  #    this OAC's distribution ARN.
+  # ══════════════════════════════════════════════════════════════════════════
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-oac-${EnvironmentName}'
+        Description: !Sub >
+          OAC for PostOp Care S3 assets bucket — ${EnvironmentName}.
+          Grants CloudFront SigV4-signed access to the private assets bucket.
+        OriginAccessControlOriginType: s3
+        # always: sign every request to S3 (recommended for private buckets)
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 3. S3 Access Logs Bucket
+  #    Receives CloudFront access logs. Separate from the application storage
+  #    stack for clean separation of concerns. ACL is required for CloudFront
+  #    log delivery — CloudFront uses the legacy ACL-based log delivery
+  #    mechanism (not S3 server-side logging with bucket ownership controls).
+  # ══════════════════════════════════════════════════════════════════════════
+  CloudFrontLogsBucket:
+    Type: AWS::S3::Bucket
+    # Retain logs on stack deletion to preserve audit trail
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-cf-logs-${EnvironmentName}-${AWS::AccountId}'
+      # CloudFront log delivery requires the bucket owner to have full control
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      # Block direct public access — logs are private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # Encrypt logs at rest
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # Lifecycle: retain CloudFront logs for 90 days (adjust per compliance needs)
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireCloudFrontLogs
+            Status: Enabled
+            ExpirationInDays: 90
+            NoncurrentVersionExpirationInDays: 7
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 4. CloudFront Distribution
+  #    Serves the React SPA from S3 and proxies /api/* to API Gateway.
+  #
+  #    Cache policy IDs (AWS managed — stable across all accounts):
+  #      CachingOptimized   : 658327ea-f89d-4fab-a63d-7e88639e58f6
+  #      CachingDisabled    : 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+  #
+  #    Origin request policy IDs:
+  #      AllViewerExceptHostHeader : b689b0a8-53d0-40ab-baf2-68738e2966ac
+  # ══════════════════════════════════════════════════════════════════════════
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'PostOp Care ${EnvironmentName} — SPA + API proxy'
+        Enabled: true
+        HttpVersion: http2and3    # Enable HTTP/3 (QUIC) for better mobile perf
+        IPV6Enabled: true
+
+        # Serve both apex and www subdomains
+        Aliases:
+          - !Ref DomainName
+          - !Sub 'www.${DomainName}'
+
+        # ── TLS Certificate ──────────────────────────────────────────────
+        ViewerCertificate:
+          # ACM cert must cover both DomainName and www.DomainName (wildcard or SAN)
+          AcmCertificateArn: !Ref AcmCertificateArn
+          # SNI-based TLS — required for custom domains (no dedicated IP needed)
+          SslSupportMethod: sni-only
+          # TLSv1.2_2021: modern TLS policy, disables TLS 1.0/1.1 and weak ciphers
+          MinimumProtocolVersion: TLSv1.2_2021
+
+        # ── WAF Association ──────────────────────────────────────────────
+        # Attach the WAF WebACL defined above
+        WebACLId: !GetAtt WafWebACL.Arn
+
+        # ── Price Class ──────────────────────────────────────────────────
+        # PriceClass_200: North America, Europe, Asia Pacific (includes India
+        # edge locations in Mumbai, Chennai, Hyderabad). Excludes South America
+        # and Africa to reduce cost while keeping low latency for target users.
+        PriceClass: PriceClass_200
+
+        # ── Origins ──────────────────────────────────────────────────────
+        Origins:
+
+          # Origin 1: S3 assets bucket (private, accessed via OAC)
+          - Id: S3AssetsOrigin
+            # Use the S3 regional domain (NOT website endpoint) — OAC requires REST API
+            DomainName: !Ref AssetsBucketDomainName
+            S3OriginConfig:
+              # Empty string disables legacy OAI; OAC is set via OriginAccessControlId
+              OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+              OriginAccessIdentity: ''
+            OriginShield:
+              # OriginShield reduces origin load; use the region where S3 bucket resides
+              Enabled: true
+              OriginShieldRegion: ap-south-1
+
+          # Origin 2: API Gateway HTTP API
+          - Id: ApiGatewayOrigin
+            # Strip protocol prefix — CloudFront DomainName takes hostname only
+            # ApiGatewayUrl format: https://abc123.execute-api.ap-south-1.amazonaws.com
+            DomainName: !Select
+              - 1
+              - !Split ['://', !Ref ApiGatewayUrl]
+            # API Gateway requires HTTPS
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              # TLS 1.2 minimum for origin connections
+              OriginSSLProtocols: [TLSv1.2]
+              # Origin response timeout: 30s (API Gateway max integration timeout is 29s)
+              OriginReadTimeout: 30
+              OriginKeepaliveTimeout: 5
+            OriginShield:
+              # Disable OriginShield for API origin — caching is disabled; shield adds latency
+              Enabled: false
+              OriginShieldRegion: ap-south-1
+
+        # ── Default Cache Behavior (SPA — S3 Origin) ─────────────────────
+        # Serves the React SPA index.html and all static assets.
+        # CloudFront handles SPA routing via custom error responses below.
+        DefaultCacheBehavior:
+          TargetOriginId: S3AssetsOrigin
+          ViewerProtocolPolicy: redirect-to-https  # Force HTTPS for all viewers
+          Compress: true                            # Gzip/Brotli compression for assets
+          AllowedMethods: [GET, HEAD]               # Static assets need only GET + HEAD
+          CachedMethods: [GET, HEAD]
+          # AWS managed CachingOptimized policy: long TTL, cache by query string disabled
+          # Policy ID: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          # No forwarding of cookies/headers to S3 (S3 ignores them anyway)
+
+        # ── /api/* Cache Behavior (API Gateway Origin) ───────────────────
+        # All API calls are proxied to API Gateway with caching disabled.
+        # Host header is stripped (API Gateway rejects the CloudFront host).
+        CacheBehaviors:
+          - PathPattern: '/api/*'
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: https-only   # Never downgrade API calls to HTTP
+            Compress: true
+            # Full HTTP method set — API supports mutations (POST, PUT, PATCH, DELETE)
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods: [GET, HEAD, OPTIONS]
+            # AWS managed CachingDisabled policy: no caching, pass-through
+            # Policy ID: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # AllViewerExceptHostHeader: forwards all headers/cookies/QS EXCEPT Host
+            # (API Gateway uses its own host; forwarding CloudFront host causes 403)
+            # Policy ID: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+
+        # ── Custom Error Responses (SPA Client-Side Routing) ─────────────
+        # When S3 returns 403 (key not found with OAC) or 404 for any path
+        # that doesn't match a physical S3 object, serve index.html with
+        # HTTP 200 so the React Router handles the route in the browser.
+        CustomErrorResponses:
+          # S3 returns 403 for missing objects (bucket policy denies unmatched keys)
+          - ErrorCode: 403
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            # Cache error responses briefly to avoid hammering origin
+            ErrorCachingMinTTL: 10
+          # S3 returns 404 for truly missing objects
+          - ErrorCode: 404
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            ErrorCachingMinTTL: 10
+
+        # ── Access Logging ────────────────────────────────────────────────
+        Logging:
+          Bucket: !GetAtt CloudFrontLogsBucket.DomainName
+          IncludeCookies: false    # Don't log cookies (contains session tokens — PHI risk)
+          Prefix: !Sub 'cloudfront/${EnvironmentName}/'
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 5. Route53 — Apex domain (postopcare.in) → CloudFront
+  #    Alias record: no TTL management; points directly at the distribution.
+  #    CloudFront's hosted zone ID is always Z2FDTNDATAQYW2 (global constant).
+  # ══════════════════════════════════════════════════════════════════════════
+  Route53ApexRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        # CloudFront's fixed hosted zone ID — do not change
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        # EvaluateTargetHealth is not supported for CloudFront aliases
+        EvaluateTargetHealth: false
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # 6. Route53 — www subdomain (www.postopcare.in) → CloudFront
+  #    Separate record set for the www alias. Both apex and www point to the
+  #    same CloudFront distribution which lists both as Aliases.
+  # ══════════════════════════════════════════════════════════════════════════
+  Route53WwwRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub 'www.${DomainName}'
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        EvaluateTargetHealth: false
+
+##############################################################################
+# Outputs — exported for use by other stacks and CI/CD pipelines
+##############################################################################
+Outputs:
+
+  CloudFrontDistributionId:
+    Description: >
+      ID of the CloudFront distribution. Used by the CI/CD pipeline to
+      trigger cache invalidations after a new SPA build is deployed to S3
+      (aws cloudfront create-invalidation --distribution-id <id> --paths "/*").
+    Value: !GetAtt CloudFrontDistribution.Id
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-CloudFrontDistributionId'
+
+  CloudFrontDomainName:
+    Description: >
+      CloudFront-assigned domain name (e.g. d1234abcd.cloudfront.net).
+      Used as the DNS target for Route53 alias records and for testing
+      before custom domain DNS propagation completes.
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-CloudFrontDomainName'
+
+  WafWebAclArn:
+    Description: >
+      ARN of the WAF WebACL protecting the CloudFront distribution.
+      Exported for reference in monitoring dashboards and security audits.
+    Value: !GetAtt WafWebACL.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-WafWebAclArn'
+
+  CloudFrontLogsBucketName:
+    Description: Name of the S3 bucket receiving CloudFront access logs.
+    Value: !Ref CloudFrontLogsBucket
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-CloudFrontLogsBucketName'
+
+  PlatformUrl:
+    Description: Primary HTTPS URL for the PostOp Care platform.
+    Value: !Sub 'https://${DomainName}'
