@@ -1,0 +1,14 @@
+{
+  "name": "@postopcare/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PostOpCare database migrations (Flyway) — PostgreSQL 16 / Aurora Serverless v2",
+  "scripts": {
+    "migrate": "flyway -configFiles=flyway.conf migrate",
+    "info": "flyway -configFiles=flyway.conf info",
+    "validate": "flyway -configFiles=flyway.conf validate",
+    "repair": "flyway -configFiles=flyway.conf repair",
+    "clean": "flyway -configFiles=flyway.conf clean",
+    "test": "node scripts/check-migrations.mjs"
+  }
+}

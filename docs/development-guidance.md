@@ -88,6 +88,23 @@ WP 0.3 status = **PAUSED** with the infra build green and 5 cycle classes resolv
 
 CI (WP 0.2) keeps **both** the infra `build` step and the infra `synth` step non-blocking (`continue-on-error`) until the DataOps↔Compute cycle is resolved and `cdk synth` is clean, at which point both should be flipped to required gates.
 
+**WP 0.4 (DB migration harness + base schema) — DONE (harness + schema authored); apply+rollback verification DEFERRED.**
+
+Harness + schema authored:
+
+- Created the `db/` workspace with Flyway config (env-var driven, no hardcoded creds).
+- `db/sql/V1__baseline_auth_schema.sql` — extensions + `user_role` / `user_status` / `auth_provider` enums + `users` / `auth_identities` / `auth_sessions` / `otp_challenges` tables & indexes, matching LLD §1.1–1.6.
+- `db/sql/V2__app_role_and_grants.sql` — the least-privilege `postopcare_app` role + default privileges, per LLD §2.
+- Offline migration checks (`npm test` in `db`) pass and are wired into the root `npm test`. `db` is a root workspace member.
+
+Noted deferral:
+
+- `users.linked_patient_id`'s FK to `patients` is intentionally left as a plain column until the migration that creates `patients` (per LLD).
+
+DoD NOT fully met:
+
+- The WP 0.4 DoD ("migrations apply to a throwaway Aurora; rollback tested") could **NOT** be executed in the current environment — no Docker, psql, local PostgreSQL, or Flyway CLI available. The migrations are authored and offline-validated but have **NOT** been applied against a real PostgreSQL/Aurora, and rollback has **NOT** been exercised. This apply+rollback verification is deferred to a DB-capable environment / CI (CodeBuild with Secrets Manager creds).
+
 ### Phase 1 — Auth & Identity
 
 | WP  | Objective                                                                                              | Spec ref           | DoD                                                                |

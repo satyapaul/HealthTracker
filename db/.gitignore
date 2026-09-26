@@ -1,0 +1,8 @@
+# Never commit local credentials or environment overrides
+.env
+.env.*
+flyway.local.conf
+
+# Flyway CLI download (if installed locally into the workspace)
+flyway-*/
+.flyway/

@@ -6,20 +6,20 @@ and LLD v1.0 (`docs/LLD-Technical-Design.md`).
 
 ## Stack
 
-| Layer         | Choice                                                                                     |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| Frontend      | React SPA (`apps/web`) — patient, doctor, admin portals                                    |
-| API           | Node.js 22 on AWS Lambda (`apps/api/functions`), one domain per folder                     |
-| Shared code   | Lambda layer at `apps/api/layers/common/nodejs`                                            |
-| Database      | PostgreSQL 16 on Aurora Serverless v2, accessed via RDS Proxy; Row-Level Security enforced |
-| Cache/session | Redis (ElastiCache) — sessions, OTP, rate limits, WS connections, hospital cache           |
-| Storage       | S3 — lab reports, chat media/voice notes, exports, hospital logos (all SSE-KMS)            |
-| Messaging     | SQS FIFO (per-channel) + SNS + EventBridge Scheduler                                       |
-| Real-time     | API Gateway WebSocket API (chat + in-app notifications)                                    |
-| Audit         | DynamoDB (auth events, delivery receipts) + relational logs in Aurora                      |
-| IaC           | AWS CDK (TypeScript) in `infra/`                                                           |
-| Migrations    | Flyway (run in CI pre-deploy)                                                              |
-| Region        | ap-south-1 (Mumbai) for all PHI; Edge (CloudFront + WAF) in us-east-1                      |
+| Layer         | Choice                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend      | React SPA (`apps/web`) — patient, doctor, admin portals                                                                                                             |
+| API           | Node.js 22 on AWS Lambda (`apps/api/functions`), one domain per folder                                                                                              |
+| Shared code   | Lambda layer at `apps/api/layers/common/nodejs`                                                                                                                     |
+| Database      | PostgreSQL 16 on Aurora Serverless v2, accessed via RDS Proxy; Row-Level Security enforced                                                                          |
+| Cache/session | Redis (ElastiCache) — sessions, OTP, rate limits, WS connections, hospital cache                                                                                    |
+| Storage       | S3 — lab reports, chat media/voice notes, exports, hospital logos (all SSE-KMS)                                                                                     |
+| Messaging     | SQS FIFO (per-channel) + SNS + EventBridge Scheduler                                                                                                                |
+| Real-time     | API Gateway WebSocket API (chat + in-app notifications)                                                                                                             |
+| Audit         | DynamoDB (auth events, delivery receipts) + relational logs in Aurora                                                                                               |
+| IaC           | AWS CDK (TypeScript) in `infra/`                                                                                                                                    |
+| Migrations    | Flyway (run in CI pre-deploy); lives in the `db/` workspace (`db/sql/V*.sql`, config `db/flyway.conf`, creds from env `FLYWAY_URL`/`FLYWAY_USER`/`FLYWAY_PASSWORD`) |
+| Region        | ap-south-1 (Mumbai) for all PHI; Edge (CloudFront + WAF) in us-east-1                                                                                               |
 
 ## Commands — monorepo root (Phase 0.1, npm workspaces)
 
@@ -59,6 +59,21 @@ Run from `infra/` (or via the root as above):
 > `ComputeStack.apiEndpointUrl`). Getting synth clean is WP 0.3's job (Infra agent), not Phase 0.1.
 > `npm run lint` and `npm test` are green.
 
+## Commands — db/ workspace (`@postopcare/db`)
+
+Migrations live here (`db/sql/V*.sql`, Flyway config `db/flyway.conf`). Credentials are env-var
+driven — never hardcoded. Run from `db/` (or via the root as above):
+
+- Test (offline): `npm test` → migration naming/order check, **no DB needed**. Wired into the root `npm test`.
+
+DB-requiring commands (need a running PostgreSQL 16 + the env vars `FLYWAY_URL` / `FLYWAY_USER` / `FLYWAY_PASSWORD`):
+
+- `npm run migrate` — apply pending migrations (flyway migrate).
+- `npm run info` — show applied/pending state (flyway info).
+- `npm run validate` — validate applied migrations against the sources (flyway validate).
+- `npm run repair` — repair the schema history table (flyway repair).
+- `npm run clean` — **destructive**: drops all objects in the target schema. Throwaway/dev DBs only.
+
 ## Runtime / versions (pinned)
 
 - Node.js **22** (Lambda + tooling); local dev may run newer (engines warns, non-blocking).
@@ -67,6 +82,7 @@ Run from `infra/` (or via the root as above):
 - Test runners: **Vitest 2.x** (apps), **Jest 29.x** (infra)
 - aws-cdk / aws-cdk-lib **2.155.0**, constructs **10.3.0**
 - PostgreSQL **16** (Aurora Serverless v2)
+- Migrations: **Flyway** is the migration tool; **PostgreSQL 16** is the target. Migrations are authored to run against Aurora PostgreSQL 16 via the RDS Proxy in real envs.
 
 ## Verification expectation
 

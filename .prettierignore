@@ -13,3 +13,9 @@ docs/older-versions
 # YAML parser cannot parse (SyntaxError: a node can have at most one tag).
 # The CDK app in lib/ is the source of truth for infra; leave these untouched.
 infra/cfn-*.yaml
+
+# SQL migrations: Prettier has no SQL parser, and applied migrations must never
+# be reformatted (see conventions.md — never edit an applied migration).
+db/sql/**
+# Flyway config is a Java .properties-style file (no Prettier parser).
+db/flyway.conf
