@@ -37,6 +37,7 @@ export class ComputeStack extends cdk.Stack {
 
   // ── Lambda functions (exposed for DataOpsStack alarms) ──────────────────────
   public readonly authFn: PostOpCareLambda;
+  public readonly authorizerFn: PostOpCareLambda;
   public readonly patientFn: PostOpCareLambda;
   public readonly followupFn: PostOpCareLambda;
   public readonly doseFn: PostOpCareLambda;
@@ -115,6 +116,21 @@ export class ComputeStack extends cdk.Stack {
         JWT_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/jwt-secret-${config.env}`,
         SMS_API_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/sms-api-secret-${config.env}`,
       },
+      ...vpcConfig,
+    });
+
+    // authorizer — dedicated API Gateway request authorizer. Uses the same
+    // source folder as authFn but bundles authorizer.ts (exported `authorizer`),
+    // which validates the opaque session token against Redis. It needs the
+    // Redis/DB env (commonEnv) but NOT the OAuth/SMS secret ARNs.
+    this.authorizerFn = new PostOpCareLambda(this, 'AuthorizerFn', {
+      functionName: 'auth',
+      entryFile: 'authorizer.ts',
+      handler: 'authorizer',
+      description: 'API Gateway request authorizer: validates session tokens (WP 1.2)',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(10),
+      environment: { ...commonEnv },
       ...vpcConfig,
     });
 
@@ -299,6 +315,7 @@ export class ComputeStack extends cdk.Stack {
     // Grant Secrets Manager read to all core functions that need DB access.
     const coreDbFunctions: PostOpCareLambda[] = [
       this.authFn,
+      this.authorizerFn,
       this.patientFn,
       this.followupFn,
       this.doseFn,
@@ -431,12 +448,13 @@ export class ComputeStack extends cdk.Stack {
     );
 
     // ── Step 5: JWT Lambda Authorizer ────────────────────────────────────────
-    // authFn validates the Bearer JWT on every protected route. It returns a
-    // SIMPLE (boolean allow/deny) response with no result caching so that
-    // revoked tokens are rejected immediately.
+    // The dedicated authorizerFn validates the opaque session token on every
+    // protected route by checking it against Redis. It returns a SIMPLE
+    // (boolean allow/deny) response with no result caching so that revoked
+    // tokens are rejected immediately.
     const jwtAuthorizer = new apigatewayv2Authorizers.HttpLambdaAuthorizer(
       'JwtAuthorizer',
-      this.authFn.function,
+      this.authorizerFn.function,
       {
         responseTypes: [apigatewayv2Authorizers.HttpLambdaResponseType.SIMPLE],
         resultsCacheTtl: cdk.Duration.seconds(0),

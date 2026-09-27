@@ -53,11 +53,9 @@ Run from `infra/` (or via the root as above):
 - Deploy one stack: `npm run deploy:<networking|database|redis|storage|messaging|compute|dataops|edge>`
 - Deploy all: `npm run deploy:all`
 
-> **Known blocker (as of Phase 0.1):** `cdk synth` does NOT pass yet. The infra CDK code was
-> written against a newer aws-cdk-lib than the pinned `2.155.0`, causing a chain of compile
-> errors (e.g. CloudFront `S3OriginAccessControl`/`S3BucketOrigin`/`Signing`, and a missing
-> `ComputeStack.apiEndpointUrl`). Getting synth clean is WP 0.3's job (Infra agent), not Phase 0.1.
-> `npm run lint` and `npm test` are green.
+> **Synth status (as of WP 0.3):** infra `cdk synth` is clean — all 9 stacks synthesize, and
+> `npm run synth` and `npm run build --workspace infra` both exit 0. CI runs infra build + synth
+> as required gates.
 
 ## Commands — db/ workspace (`@postopcare/db`)
 

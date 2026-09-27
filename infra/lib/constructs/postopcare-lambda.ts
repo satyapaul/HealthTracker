@@ -13,6 +13,8 @@ export interface PostOpCareLambdaProps {
   description: string;
   /** Handler export name. Default: handler */
   handler?: string;
+  /** Source entry file within the function folder. Default: index.ts */
+  entryFile?: string;
   memorySize: number;
   timeout: cdk.Duration;
   environment: Record<string, string>;
@@ -33,7 +35,7 @@ export class PostOpCareLambda extends Construct {
       __dirname,
       '../../../apps/api/functions',
       props.functionName,
-      'index.ts'
+      props.entryFile ?? 'index.ts'
     );
 
     const nodeJsProps: NodejsFunctionProps = {
