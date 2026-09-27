@@ -6,7 +6,8 @@ import { RedisStack } from '../lib/stacks/redis-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { MessagingStack } from '../lib/stacks/messaging-stack';
 import { ComputeStack } from '../lib/stacks/compute-stack';
-import { DataOpsStack } from '../lib/stacks/data-ops-stack';
+import { DataStack } from '../lib/stacks/data-stack';
+import { ObservabilityStack } from '../lib/stacks/observability-stack';
 import { EdgeStack } from '../lib/stacks/edge-stack';
 
 interface PostOpCareConfig {
@@ -93,6 +94,15 @@ const messagingStack = new MessagingStack(app, `PostOpCare-Messaging-${config.en
 });
 tagStack(messagingStack);
 
+// Layer 2e: Data (independent) — DynamoDB tables + KMS. Created before Compute so
+// Compute depends on it and grants its own functions access (one-way Compute→Data).
+const dataStack = new DataStack(app, `PostOpCare-Data-${config.env}`, {
+  stackName: `PostOpCare-Data-${config.env}`,
+  env: stackEnv,
+  config,
+});
+tagStack(dataStack);
+
 // Layer 3: Compute (depends on all layer 2 stacks)
 const computeStack = new ComputeStack(app, `PostOpCare-Compute-${config.env}`, {
   stackName: `PostOpCare-Compute-${config.env}`,
@@ -103,6 +113,7 @@ const computeStack = new ComputeStack(app, `PostOpCare-Compute-${config.env}`, {
   redisStack,
   storageStack,
   messagingStack,
+  dataStack,
   // EdgeStack (us-east-1) consumes apiUrl from this stack.
   crossRegionReferences: true,
 });
@@ -111,19 +122,22 @@ computeStack.addDependency(databaseStack);
 computeStack.addDependency(redisStack);
 computeStack.addDependency(storageStack);
 computeStack.addDependency(messagingStack);
+computeStack.addDependency(dataStack);
 tagStack(computeStack);
 
-// Layer 4a: DataOps (depends on compute + messaging for Lambda ARNs + queue ARNs)
-const dataOpsStack = new DataOpsStack(app, `PostOpCare-DataOps-${config.env}`, {
-  stackName: `PostOpCare-DataOps-${config.env}`,
+// Layer 4a: Observability (depends on compute + messaging for Lambda metrics,
+// API URL, SQS queues, and the alerts topic). The DynamoDB tables + KMS moved
+// to DataStack (Layer 2e); this stack holds only alarms/dashboard/log groups.
+const observabilityStack = new ObservabilityStack(app, `PostOpCare-Observability-${config.env}`, {
+  stackName: `PostOpCare-Observability-${config.env}`,
   env: stackEnv,
   config,
   computeStack,
   messagingStack,
 });
-dataOpsStack.addDependency(computeStack);
-dataOpsStack.addDependency(messagingStack);
-tagStack(dataOpsStack);
+observabilityStack.addDependency(computeStack);
+observabilityStack.addDependency(messagingStack);
+tagStack(observabilityStack);
 
 // Layer 4b: Edge / CDN
 // NOTE: WAF WebACLs for CloudFront MUST be created in us-east-1.

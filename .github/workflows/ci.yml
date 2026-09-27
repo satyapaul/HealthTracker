@@ -34,22 +34,11 @@ jobs:
       - name: Test
         run: npm test
 
-      # App workspaces are a hard gate; their builds pass today.
-      - name: Build (apps)
-        run: |
-          npm run build --workspace @postopcare/api
-          npm run build --workspace @postopcare/web
+      # Build all workspaces (apps + infra). Infra build was made clean in WP 0.3.
+      - name: Build
+        run: npm run build
 
-      # WP 0.3 carry-over: the infra package was authored but never successfully
-      # compiled/synthesized. Its `tsc` build (pre-existing type errors, e.g.
-      # MessagingStack.milestoneDlq) and `cdk synth` (Networking<->Database
-      # dependency cycle) are not yet clean. Keep infra non-blocking until WP 0.3
-      # lands, then remove continue-on-error to make these required gates.
-      # TODO(WP 0.3): flip both infra steps to required once build + synth are clean.
-      - name: Build (infra, non-blocking until WP 0.3)
-        run: npm run build --workspace infra
-        continue-on-error: true
-
-      - name: Infra synth (non-blocking until WP 0.3)
+      # Infra synth is a required gate as of WP 0.3 (the DataOps split resolved
+      # the last cross-stack dependency cycle; `cdk synth` is clean).
+      - name: Infra synth
         run: npm run synth
-        continue-on-error: true

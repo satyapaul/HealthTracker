@@ -6,6 +6,9 @@ dist/
 cdk.out/
 *.tsbuildinfo
 
+# CDK context cache (contains account-specific AZ/lookup data)
+cdk.context.json
+
 # Test / coverage
 coverage/
 

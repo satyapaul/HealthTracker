@@ -48,7 +48,7 @@ Each phase ends in an evaluated, demoable milestone. Work packages (WPs) inside 
 
 #### Phase 0 — Status & Carry-Over (as of current work)
 
-Phase 0 tooling is in place and green, and infra fixes made major progress before being paused. WP 0.3's `cdk synth` DoD is **not yet met**: the infra code was authored but had never been successfully synthesized, so making it synth-clean is a larger task than a one-time bootstrap step — treat it as a focused work effort, not a formality. WP 0.3 is currently **PAUSED with substantial progress banked** (see below), not completed.
+Phase 0 is complete: tooling is in place and green, and the infra now synthesizes cleanly. All four work packages are done — 0.1 (monorepo tooling) done, 0.2 (CI skeleton) done, 0.3 (infra `cdk synth` clean) done, and 0.4 (DB migration harness + base schema) done with apply/rollback verification deferred to a DB-capable environment. WP 0.3's `cdk synth` DoD is now **met**: the infra code synthesizes cleanly and the infra TypeScript build is green.
 
 **WP 0.1 (Monorepo tooling) — DONE.**
 
@@ -58,7 +58,7 @@ Phase 0 tooling is in place and green, and infra fixes made major progress befor
 - `apps/web` and `apps/api` scaffolds with passing tests; `infra` folded in as a workspace member.
 - `npm ci && npm run lint && npm test` are green.
 
-**WP 0.3 (infra `cdk synth` clean) — PAUSED, progress banked. Carry-over for the Infra agent.**
+**WP 0.3 (infra `cdk synth` clean) — DONE. `cdk synth` clean; infra build green.**
 
 Earlier fixes (all in `infra/`, plus app-side stubs):
 
@@ -79,14 +79,19 @@ Cross-stack dependency cycles fixed so far (all pre-existing — the infra had n
 - **Compute→Database secret cycle** — replaced `dbSecret.grantRead(fn)` (which mutated the Database-owned secret with Compute role ARNs) with identity-based IAM policies on each Compute function using the secret ARN string + `kms:Decrypt` on the Aurora key ARN.
 - **Edge↔Storage (cross-region) cycle** — added `crossRegionReferences: true` to the Storage, Compute, and Edge stacks in `bin/app.ts`, and moved the CloudFront Origin Access Identity (OAI) into the Storage stack. The `grantRead`/`grantDecrypt` now happen in Storage (where the bucket + KMS key live); `EdgeStack` consumes `storageStack.assetsOai` for its S3 origin, making the reference one-way (Edge→Storage).
 - **Messaging↔Compute cycle** — moved the EventBridge Scheduler IAM role out of `MessagingStack` into `ComputeStack` (which owns the MilestoneEvaluator Lambda whose ARN the role references, and the `CfnSchedule`s); removed the placeholder role/output from `MessagingStack`.
+- **DataOps↔Compute cycle — RESOLVED (final fix).** `DataOpsStack` was mutually referential with `ComputeStack`: it (a) granted its DynamoDB tables + `dynamoKmsKey` to Compute Lambda functions (writing DataOps ARNs into Compute role policies → Compute→DataOps) **and** (b) read Compute Lambda metrics for CloudWatch alarms/dashboards and depended on Compute (DataOps→Compute). Because both directions were real, this was a stack-layering issue, not a misplaced-grant quick fix. Resolved by splitting the old `DataOpsStack` into two stacks:
+  - **`DataStack`** (`PostOpCare-Data-${env}`, new `infra/lib/stacks/data-stack.ts`) — the DynamoDB tables (`auditAuthTable`, `reminderDeliveryTable` + GSIs) and the `dynamoKmsKey`. It carries no Compute/Messaging references and is created **before** Compute (Layer 2e in `bin/app.ts`).
+  - **`ObservabilityStack`** (`PostOpCare-Observability-${env}`, new `infra/lib/stacks/observability-stack.ts`) — CloudWatch log groups, alarms (API GW 5xx/4xx, Auth/MilestoneEvaluator/NotificationDispatcher Lambda errors, per-channel SQS DLQ alarms), the SNS alarm action, and the ops dashboard. It is created **after** Compute and depends on Compute + Messaging.
+  - The DynamoDB table + KMS grants were moved into `ComputeStack`, which now takes a `dataStack` prop and grants its own functions access via the table/key ARNs — a one-way Compute→Data edge.
+  - The old combined `infra/lib/stacks/data-ops-stack.ts` was deleted.
 
-Remaining blocker before `cdk synth` is clean:
+`cdk synth` now CLEAN:
 
-- **DataOps↔Compute cycle (the one remaining).** `DataOpsStack` is mutually referential with `ComputeStack`: it (a) grants its DynamoDB tables + `dynamoKmsKey` to Compute Lambda functions (writing DataOps ARNs into Compute role policies → Compute→DataOps) **and** (b) reads Compute Lambda metrics for CloudWatch alarms/dashboards and depends on Compute (DataOps→Compute). Because both directions are real, this is not a misplaced-grant quick fix — it reflects a stack-layering issue. Recommended fix is to **split DataOps** into: a **Data** stack (DynamoDB tables + KMS) created **before** Compute so Compute depends on it and grants itself access, and an **Observability** stack (alarms/dashboards) created **after** Compute. This is a deliberate architecture decision deferred for a focused effort.
+- `npm run build --workspace infra` (`tsc`) and `cdk synth` both exit 0. `cdk synth` successfully synthesizes all 9 stacks: Networking, Database, Redis, Storage, Messaging, Data, Compute, Observability, Edge. There is no remaining blocker. Root `npm run lint` and `npm test` are also green.
 
-WP 0.3 status = **PAUSED** with the infra build green and 5 cycle classes resolved; `cdk synth` is still red on the single DataOps↔Compute layering cycle above.
+WP 0.3 status = **DONE** — infra build green, all 6 cycle classes resolved, `cdk synth` clean across all 9 stacks.
 
-CI (WP 0.2) keeps **both** the infra `build` step and the infra `synth` step non-blocking (`continue-on-error`) until the DataOps↔Compute cycle is resolved and `cdk synth` is clean, at which point both should be flipped to required gates.
+CI (WP 0.2) now runs the infra build (folded into the `Build` step across all workspaces) and the `Infra synth` step as **required gates** — the `continue-on-error` flags were removed, so both are blocking.
 
 **WP 0.4 (DB migration harness + base schema) — DONE (harness + schema authored); apply+rollback verification DEFERRED.**
 

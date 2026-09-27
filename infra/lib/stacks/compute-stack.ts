@@ -16,6 +16,7 @@ import { DatabaseStack } from './database-stack';
 import { RedisStack } from './redis-stack';
 import { StorageStack } from './storage-stack';
 import { MessagingStack } from './messaging-stack';
+import { DataStack } from './data-stack';
 
 export interface ComputeStackProps extends cdk.StackProps {
   config: PostOpCareConfig;
@@ -24,6 +25,7 @@ export interface ComputeStackProps extends cdk.StackProps {
   redisStack: RedisStack;
   storageStack: StorageStack;
   messagingStack: MessagingStack;
+  dataStack: DataStack;
 }
 
 export class ComputeStack extends cdk.Stack {
@@ -67,8 +69,15 @@ export class ComputeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ComputeStackProps) {
     super(scope, id, props);
 
-    const { config, networkingStack, databaseStack, redisStack, storageStack, messagingStack } =
-      props;
+    const {
+      config,
+      networkingStack,
+      databaseStack,
+      redisStack,
+      storageStack,
+      messagingStack,
+      dataStack,
+    } = props;
     const isProd = config.env === 'prod';
 
     // ── Step 1: Common Lambda environment variables ──────────────────────────
@@ -365,6 +374,19 @@ export class ComputeStack extends cdk.Stack {
     messagingStack.encryptionKey.grantDecrypt(this.whatsappSenderFn.function);
     messagingStack.encryptionKey.grantDecrypt(this.emailSenderFn.function);
     messagingStack.encryptionKey.grantDecrypt(this.inappSenderFn.function);
+
+    // ── DynamoDB (DataStack) grants ──────────────────────────────────────────
+    // Granted HERE (not in DataStack) so the grants attach to Compute roles
+    // referencing DataStack table/key ARNs (Compute → Data edge). DataStack is
+    // created before Compute, so this is one-way and cycle-free. (Previously
+    // these lived in DataOpsStack and caused the DataOps↔Compute cycle.)
+    dataStack.auditAuthTable.grantWriteData(this.apiHandlerFunction);
+    dataStack.reminderDeliveryTable.grantWriteData(this.notificationDispatcherFunction);
+    dataStack.auditAuthTable.grantReadData(this.milestoneEvaluatorFunction);
+    dataStack.reminderDeliveryTable.grantReadWriteData(this.milestoneEvaluatorFunction);
+    dataStack.dynamoKmsKey.grantEncryptDecrypt(this.apiHandlerFunction);
+    dataStack.dynamoKmsKey.grantEncryptDecrypt(this.notificationDispatcherFunction);
+    dataStack.dynamoKmsKey.grantEncryptDecrypt(this.milestoneEvaluatorFunction);
 
     // SQS event sources: each sender polls its dedicated channel queue
     this.smsSenderFn.function.addEventSource(
