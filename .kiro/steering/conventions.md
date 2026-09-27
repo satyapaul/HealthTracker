@@ -11,6 +11,14 @@ package; do not refactor unrelated code.
 - **Enforce access at both layers.** API-layer authorization AND PostgreSQL Row-Level Security.
   Every DB query runs with session vars set: `app.current_user_id`, `app.current_role`,
   and (for patient/caregiver) `app.current_patient_id`. Never bypass RLS with a superuser role.
+- **Apply RLS context via the shared helper only.** The one approved way to set the session
+  context is the common Lambda-layer helper in `apps/api/layers/common/nodejs` (`@postopcare/common`):
+  `withRlsContext(runner, ctx, fn)` / `applyRlsContext`, which set `app.current_user_id` /
+  `app.current_role` / `app.current_patient_id` transaction-locally via parameterized
+  `set_config(name, $1, true)` — never string-interpolated. `normalizeAuthorizerContext` maps the
+  WP 1.2 authorizer context and enforces the invariants (patient/caregiver require a patientId;
+  doctor/admin forbid one). New DB access in later phases MUST use this helper — do not hand-roll
+  `SET`/`set_config` statements.
 - **Immutable records are immutable.** Chat transcripts, dose-change history, authorization
   grants, and case-transfer logs are append-only — no UPDATE/DELETE paths.
 - **Secrets** come from Secrets Manager / SSM Parameter Store — never hardcoded, never committed.

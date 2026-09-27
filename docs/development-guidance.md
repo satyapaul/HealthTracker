@@ -110,6 +110,34 @@ DoD NOT fully met:
 
 - The WP 0.4 DoD ("migrations apply to a throwaway Aurora; rollback tested") could **NOT** be executed in the current environment — no Docker, psql, local PostgreSQL, or Flyway CLI available. The migrations are authored and offline-validated but have **NOT** been applied against a real PostgreSQL/Aurora, and rollback has **NOT** been exercised. This apply+rollback verification is deferred to a DB-capable environment / CI (CodeBuild with Secrets Manager creds).
 
+#### Phase 1 — WP 1.1 / 1.2 / 1.3 Status (as of current work)
+
+**WP 1.1 (Auth Lambda) — DONE (committed).**
+
+- Google OAuth, X OAuth, and SMS OTP sign-in with JWT / opaque-session-in-Redis, in `apps/api/functions/auth`.
+- Unit-tested; reviewer **PASS**.
+- Live DB / Redis / Secrets adapters are `not-wired` stubs pending infra plumbing.
+
+**WP 1.2 (API Gateway authorizer) — DONE (committed).**
+
+- SIMPLE request authorizer validating the session token against Redis, deny-by-default, `resultsCacheTtl` 0.
+- Dedicated `authorizerFn` in `compute-stack` (least-privilege — no OAuth/SMS secrets).
+- Unit-tested; reviewer **PASS**.
+
+**WP 1.3 (RLS policies + session variables) — PARTIAL / scoped (Option 1).**
+
+The reusable RLS session-variable **mechanism** is DONE:
+
+- Shared helper in `apps/api/layers/common/nodejs` (`@postopcare/common`): `normalizeAuthorizerContext` / `applyRlsContext` / `withRlsContext`, using parameterized `set_config`. Unit-tested (16 tests).
+- Flyway migration `V3__rls_session_context.sql` adds the read-side helper functions (`app_current_user_id` / `app_current_role` / `app_current_patient_id`) and documents the convention, **without** enabling RLS on not-yet-existent tables.
+
+DEFERRED to Phase 2 (explicitly):
+
+- The per-table RLS policies from LLD §2 (`patients`, `follow_up_rows`, etc.) land in each clinical table's own migration when that table is created.
+- WP 1.3's DoD ("cross-patient access denied in integration tests") requires those tables plus a live PostgreSQL, so the integration test is deferred to a DB-capable environment / Phase 2.
+
+This is the same honest deferral pattern used for WP 0.4's apply/rollback verification above.
+
 ### Phase 1 — Auth & Identity
 
 | WP  | Objective                                                                                              | Spec ref           | DoD                                                                |
