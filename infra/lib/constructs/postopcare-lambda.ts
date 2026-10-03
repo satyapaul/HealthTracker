@@ -8,8 +8,20 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'path';
 
 export interface PostOpCareLambdaProps {
-  /** Lambda function name (also used to resolve source path under apps/api/functions/) */
+  /**
+   * Logical Lambda name. Used to build the physical function name
+   * (`postopcare-<functionName>-<env>`) and, unless `sourceDir` is given, to
+   * resolve the source folder under apps/api/functions/. Must be unique within
+   * the stack — two functions sharing a physical name fails CloudFormation's
+   * early validation (resource name conflict).
+   */
   functionName: string;
+  /**
+   * Source folder under apps/api/functions/ to bundle from. Defaults to
+   * `functionName`. Set this when two functions share one source domain but
+   * need distinct physical names (e.g. the auth handler and its authorizer).
+   */
+  sourceDir?: string;
   description: string;
   /** Handler export name. Default: handler */
   handler?: string;
@@ -34,7 +46,7 @@ export class PostOpCareLambda extends Construct {
     const entry = path.join(
       __dirname,
       '../../../apps/api/functions',
-      props.functionName,
+      props.sourceDir ?? props.functionName,
       props.entryFile ?? 'index.ts'
     );
 

@@ -155,7 +155,11 @@ export class ComputeStack extends cdk.Stack {
     // which validates the opaque session token against Redis. It needs the
     // Redis/DB env (commonEnv) but NOT the OAuth/SMS secret ARNs.
     this.authorizerFn = new PostOpCareLambda(this, 'AuthorizerFn', {
-      functionName: 'auth',
+      // Distinct physical name from authFn (both can't be postopcare-auth-dev —
+      // a duplicate FunctionName fails CloudFormation early validation). Bundles
+      // from the shared `auth` source folder via sourceDir.
+      functionName: 'auth-authorizer',
+      sourceDir: 'auth',
       entryFile: 'authorizer.ts',
       handler: 'authorizer',
       description: 'API Gateway request authorizer: validates session tokens (WP 1.2)',
@@ -221,8 +225,12 @@ export class ComputeStack extends cdk.Stack {
 
     // notificationDispatcher — receives from an upstream source and fans out
     // to the per-channel queues.
+    // The five notification functions share the `notification` source folder but
+    // each needs a distinct physical FunctionName — duplicates fail
+    // CloudFormation early validation. sourceDir keeps them bundling from one folder.
     this.notificationDispatcherFn = new PostOpCareLambda(this, 'NotificationDispatcherFn', {
-      functionName: 'notification',
+      functionName: 'notification-dispatcher',
+      sourceDir: 'notification',
       description: 'Notification dispatcher: routes events to per-channel FIFO queues',
       memorySize: 256,
       timeout: cdk.Duration.seconds(60),
@@ -240,7 +248,8 @@ export class ComputeStack extends cdk.Stack {
     // Each polls its dedicated FIFO queue and calls the upstream provider.
 
     this.smsSenderFn = new PostOpCareLambda(this, 'SmsSenderFn', {
-      functionName: 'notification',
+      functionName: 'notification-sms',
+      sourceDir: 'notification',
       description: 'SMS channel sender: dequeues from smsQueue and calls SMS gateway',
       handler: 'sms.handler',
       memorySize: 256,
@@ -253,7 +262,8 @@ export class ComputeStack extends cdk.Stack {
     });
 
     this.whatsappSenderFn = new PostOpCareLambda(this, 'WhatsappSenderFn', {
-      functionName: 'notification',
+      functionName: 'notification-whatsapp',
+      sourceDir: 'notification',
       description: 'WhatsApp channel sender: dequeues from whatsappQueue and calls WA API',
       handler: 'whatsapp.handler',
       memorySize: 256,
@@ -265,7 +275,8 @@ export class ComputeStack extends cdk.Stack {
     });
 
     this.emailSenderFn = new PostOpCareLambda(this, 'EmailSenderFn', {
-      functionName: 'notification',
+      functionName: 'notification-email',
+      sourceDir: 'notification',
       description: 'Email channel sender: dequeues from emailQueue and sends via SES',
       handler: 'email.handler',
       memorySize: 256,
@@ -280,7 +291,8 @@ export class ComputeStack extends cdk.Stack {
     // inappSenderFn needs the WebSocket callback URL — set after wsStage is created.
     // We construct with a placeholder and update the env after wsStage is defined.
     this.inappSenderFn = new PostOpCareLambda(this, 'InappSenderFn', {
-      functionName: 'notification',
+      functionName: 'notification-inapp',
+      sourceDir: 'notification',
       description: 'In-app channel sender: dequeues from inappQueue and pushes via WebSocket',
       handler: 'inapp.handler',
       memorySize: 256,
@@ -456,13 +468,20 @@ export class ComputeStack extends cdk.Stack {
       })
     );
 
-    // SES SendEmail for email sender
+    // SES SendEmail for email sender.
+    // Scope to all identities in this account/region (identity/*) rather than a
+    // single named identity. A wildcard resource references no concrete SES
+    // identity, so CloudFormation's AWS::EarlyValidation::ResourceExistenceCheck
+    // has nothing to validate — a specific `identity/${config.domainName}` ARN
+    // fails changeset creation until that identity is verified in SES. Send
+    // authorization is still constrained to this account's identities in-region;
+    // actual sending is further gated by which identities are verified in SES.
     this.emailSenderFn.addToRolePolicy(
       new iam.PolicyStatement({
         sid: 'SesSendEmail',
         effect: iam.Effect.ALLOW,
         actions: ['ses:SendEmail', 'ses:SendRawEmail', 'ses:SendTemplatedEmail'],
-        resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${config.domainName}`],
+        resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
       })
     );
 
