@@ -56,7 +56,9 @@ export function buildDeps(env: Env): AuthDeps {
     google: makeGoogleOAuth(
       {
         clientId: strEnv(env, 'GOOGLE_CLIENT_ID'),
-        clientSecretArn: strEnv(env, 'GOOGLE_CLIENT_SECRET_ARN'),
+        // Secret identifier: name or ARN (Secrets Manager accepts either).
+        clientSecretArn:
+          strEnv(env, 'GOOGLE_CLIENT_SECRET_ID') || strEnv(env, 'GOOGLE_CLIENT_SECRET_ARN'),
         tokenEndpoint: strEnv(env, 'GOOGLE_TOKEN_ENDPOINT', 'https://oauth2.googleapis.com/token'),
         tokenInfoEndpoint: strEnv(
           env,
@@ -69,7 +71,7 @@ export function buildDeps(env: Env): AuthDeps {
     x: makeXOAuth(
       {
         clientId: strEnv(env, 'X_CLIENT_ID'),
-        clientSecretArn: strEnv(env, 'X_CLIENT_SECRET_ARN'),
+        clientSecretArn: strEnv(env, 'X_CLIENT_SECRET_ID') || strEnv(env, 'X_CLIENT_SECRET_ARN'),
         tokenEndpoint: strEnv(env, 'X_TOKEN_ENDPOINT', 'https://api.x.com/2/oauth2/token'),
         userInfoEndpoint: strEnv(env, 'X_USERINFO_ENDPOINT', 'https://api.x.com/2/users/me'),
       },
@@ -78,7 +80,7 @@ export function buildDeps(env: Env): AuthDeps {
     sms: makeHttpSmsGateway(
       {
         endpoint: strEnv(env, 'SMS_API_ENDPOINT'),
-        apiSecretArn: strEnv(env, 'SMS_API_SECRET_ARN'),
+        apiSecretArn: strEnv(env, 'SMS_API_SECRET_ID') || strEnv(env, 'SMS_API_SECRET_ARN'),
         sender: strEnv(env, 'SMS_SENDER_ID'),
       },
       secrets

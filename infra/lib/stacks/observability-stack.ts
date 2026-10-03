@@ -38,6 +38,51 @@ export class ObservabilityStack extends cdk.Stack {
     const isProd = env === 'prod';
     const logRemovalPolicy = isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY;
 
+    // ── Compute values via explicit named exports (NOT live token refs) ───────
+    // Consuming computeStack.apiUrl / computeStack.*Function directly forces CDK
+    // to mint auto-generated `PostOpCare-Compute-dev:ExportsOutput*` exports on
+    // the Compute template. Those self-prefixed exports trip CloudFormation's
+    // early-validation ResourceExistenceCheck on the Compute changeset. Instead
+    // we import the stable, hand-named exports ComputeStack already publishes
+    // (ApiUrl + per-function ARNs) via Fn::ImportValue. The import lands only on
+    // THIS (Observability) template; Compute keeps just its own clean outputs.
+    void computeStack; // dependency retained in app.ts via addDependency()
+    const apiUrl = cdk.Fn.importValue(`PostOpCare-ApiUrl-${env}`);
+    // The API id is the 3rd '/'-delimited segment of the endpoint URL
+    // (https://<apiId>.execute-api.<region>.amazonaws.com). Same derivation as
+    // before — behavior unchanged.
+    const apiId = cdk.Fn.select(2, cdk.Fn.split('/', apiUrl));
+
+    // Lambda metric dimensions use the function NAME. The last ':'-delimited
+    // segment of a function ARN is its name
+    // (arn:aws:lambda:<region>:<acct>:function:<name>), so derive it from each
+    // imported ARN. This reproduces the exact AWS/Lambda FunctionName dimension
+    // the previous `fn.metricErrors()` calls emitted, without a live cross-stack
+    // token (which is what minted the Compute self-exports).
+    const fnNameFromArn = (arn: string): string => cdk.Fn.select(6, cdk.Fn.split(':', arn));
+    const authFnName = fnNameFromArn(cdk.Fn.importValue(`PostOpCare-AuthFnArn-${env}`));
+    const milestoneEvaluatorFnName = fnNameFromArn(
+      cdk.Fn.importValue(`PostOpCare-MilestoneEvaluatorFnArn-${env}`)
+    );
+    const notificationDispatcherFnName = fnNameFromArn(
+      cdk.Fn.importValue(`PostOpCare-NotificationDispatcherFnArn-${env}`)
+    );
+
+    // Helper: build an AWS/Lambda metric for a given function name + metric name.
+    const lambdaMetric = (
+      functionName: string,
+      metricName: 'Errors' | 'Invocations',
+      props2: { period: cdk.Duration; label: string }
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: 'AWS/Lambda',
+        metricName,
+        dimensionsMap: { FunctionName: functionName },
+        period: props2.period,
+        statistic: 'Sum',
+        label: props2.label,
+      });
+
     // ── 1. SNS alarm action ───────────────────────────────────────────────────
     // MessagingStack already creates and exports alertsTopic.
     // Re-use it so all ops alarms fan into the same subscription.
@@ -73,7 +118,7 @@ export class ObservabilityStack extends cdk.Stack {
         namespace: 'AWS/ApiGateway',
         metricName: '5xx',
         dimensionsMap: {
-          ApiId: cdk.Fn.select(2, cdk.Fn.split('/', computeStack.apiUrl)),
+          ApiId: apiId,
           Stage: '$default',
         },
         period: cdk.Duration.minutes(5),
@@ -94,7 +139,7 @@ export class ObservabilityStack extends cdk.Stack {
         namespace: 'AWS/ApiGateway',
         metricName: '4xx',
         dimensionsMap: {
-          ApiId: cdk.Fn.select(2, cdk.Fn.split('/', computeStack.apiUrl)),
+          ApiId: apiId,
           Stage: '$default',
         },
         period: cdk.Duration.minutes(5),
@@ -111,9 +156,8 @@ export class ObservabilityStack extends cdk.Stack {
     const authLambdaErrorAlarm = new cloudwatch.Alarm(this, 'AuthLambdaErrorAlarm', {
       alarmName: `postopcare-auth-errors-${env}`,
       alarmDescription: 'Auth Lambda (apiHandler) error count exceeded 5 in 5 minutes',
-      metric: computeStack.apiHandlerFunction.metricErrors({
+      metric: lambdaMetric(authFnName, 'Errors', {
         period: cdk.Duration.minutes(5),
-        statistic: 'Sum',
         label: 'Auth Lambda Errors',
       }),
       threshold: 5,
@@ -130,9 +174,8 @@ export class ObservabilityStack extends cdk.Stack {
       {
         alarmName: `postopcare-milestone-evaluator-errors-${env}`,
         alarmDescription: 'CRITICAL: MilestoneEvaluator Lambda encountered any errors in 5 minutes',
-        metric: computeStack.milestoneEvaluatorFunction.metricErrors({
+        metric: lambdaMetric(milestoneEvaluatorFnName, 'Errors', {
           period: cdk.Duration.minutes(5),
-          statistic: 'Sum',
           label: 'MilestoneEvaluator Errors',
         }),
         threshold: 0,
@@ -150,9 +193,8 @@ export class ObservabilityStack extends cdk.Stack {
       {
         alarmName: `postopcare-notification-dispatcher-errors-${env}`,
         alarmDescription: 'NotificationDispatcher Lambda error count exceeded 5 in 5 minutes',
-        metric: computeStack.notificationDispatcherFunction.metricErrors({
+        metric: lambdaMetric(notificationDispatcherFnName, 'Errors', {
           period: cdk.Duration.minutes(5),
-          statistic: 'Sum',
           label: 'NotificationDispatcher Errors',
         }),
         threshold: 5,
@@ -203,7 +245,7 @@ export class ObservabilityStack extends cdk.Stack {
             namespace: 'AWS/ApiGateway',
             metricName: 'Count',
             dimensionsMap: {
-              ApiId: cdk.Fn.select(2, cdk.Fn.split('/', computeStack.apiUrl)),
+              ApiId: apiId,
               Stage: '$default',
             },
             period: cdk.Duration.minutes(1),
@@ -221,7 +263,7 @@ export class ObservabilityStack extends cdk.Stack {
             namespace: 'AWS/ApiGateway',
             metricName: '5xx',
             dimensionsMap: {
-              ApiId: cdk.Fn.select(2, cdk.Fn.split('/', computeStack.apiUrl)),
+              ApiId: apiId,
               Stage: '$default',
             },
             period: cdk.Duration.minutes(1),
@@ -239,7 +281,7 @@ export class ObservabilityStack extends cdk.Stack {
             namespace: 'AWS/ApiGateway',
             metricName: '4xx',
             dimensionsMap: {
-              ApiId: cdk.Fn.select(2, cdk.Fn.split('/', computeStack.apiUrl)),
+              ApiId: apiId,
               Stage: '$default',
             },
             period: cdk.Duration.minutes(1),
@@ -257,16 +299,14 @@ export class ObservabilityStack extends cdk.Stack {
       new cloudwatch.GraphWidget({
         title: 'Auth Lambda (apiHandler) — Invocations & Errors',
         left: [
-          computeStack.apiHandlerFunction.metricInvocations({
+          lambdaMetric(authFnName, 'Invocations', {
             period: cdk.Duration.minutes(1),
-            statistic: 'Sum',
             label: 'Invocations',
           }),
         ],
         right: [
-          computeStack.apiHandlerFunction.metricErrors({
+          lambdaMetric(authFnName, 'Errors', {
             period: cdk.Duration.minutes(1),
-            statistic: 'Sum',
             label: 'Errors',
           }),
         ],
@@ -276,16 +316,14 @@ export class ObservabilityStack extends cdk.Stack {
       new cloudwatch.GraphWidget({
         title: 'MilestoneEvaluator — Invocations & Errors',
         left: [
-          computeStack.milestoneEvaluatorFunction.metricInvocations({
+          lambdaMetric(milestoneEvaluatorFnName, 'Invocations', {
             period: cdk.Duration.minutes(1),
-            statistic: 'Sum',
             label: 'Invocations',
           }),
         ],
         right: [
-          computeStack.milestoneEvaluatorFunction.metricErrors({
+          lambdaMetric(milestoneEvaluatorFnName, 'Errors', {
             period: cdk.Duration.minutes(1),
-            statistic: 'Sum',
             label: 'Errors',
           }),
         ],

@@ -104,6 +104,13 @@ const dataStack = new DataStack(app, `PostOpCare-Data-${config.env}`, {
 tagStack(dataStack);
 
 // Layer 3: Compute (depends on all layer 2 stacks)
+// Edge/CloudFront is opt-in. It lives in us-east-1 and consumes ap-south-1
+// Storage + Compute via cross-region references (SSM exports). That cross-region
+// coupling trips CloudFormation's early-validation ResourceExistenceCheck during
+// Compute's changeset, so Edge is OFF by default and the cross-region wiring is
+// only enabled when explicitly requested: `cdk deploy -c deployEdge=true ...`.
+const deployEdge = app.node.tryGetContext('deployEdge') === 'true';
+
 const computeStack = new ComputeStack(app, `PostOpCare-Compute-${config.env}`, {
   stackName: `PostOpCare-Compute-${config.env}`,
   env: stackEnv,
@@ -114,8 +121,8 @@ const computeStack = new ComputeStack(app, `PostOpCare-Compute-${config.env}`, {
   storageStack,
   messagingStack,
   dataStack,
-  // EdgeStack (us-east-1) consumes apiUrl from this stack.
-  crossRegionReferences: true,
+  // Only needed when EdgeStack (us-east-1) consumes apiUrl from this stack.
+  crossRegionReferences: deployEdge,
 });
 computeStack.addDependency(networkingStack);
 computeStack.addDependency(databaseStack);
@@ -139,23 +146,23 @@ observabilityStack.addDependency(computeStack);
 observabilityStack.addDependency(messagingStack);
 tagStack(observabilityStack);
 
-// Layer 4b: Edge / CDN
+// Layer 4b: Edge / CDN (opt-in — see deployEdge above).
 // NOTE: WAF WebACLs for CloudFront MUST be created in us-east-1.
-// The EdgeStack should be deployed with region override to us-east-1,
-// or WAF should be separated into a dedicated us-east-1 stack.
-// For now EdgeStack deploys CloudFront + Route53 in the primary region;
-// WAF is managed separately or via a cross-region reference.
-const edgeStack = new EdgeStack(app, `PostOpCare-Edge-${config.env}`, {
-  stackName: `PostOpCare-Edge-${config.env}`,
-  env: { account: config.account, region: 'us-east-1' }, // CloudFront + WAF must be us-east-1
-  config,
-  storageStack,
-  computeStack,
-  // Consumes ap-south-1 Storage + Compute resources across regions.
-  crossRegionReferences: true,
-});
-edgeStack.addDependency(storageStack);
-edgeStack.addDependency(computeStack);
-tagStack(edgeStack);
+// Edge is only instantiated when `-c deployEdge=true` is passed, so the default
+// deploy has no ap-south-1 -> us-east-1 cross-region coupling on Compute.
+if (deployEdge) {
+  const edgeStack = new EdgeStack(app, `PostOpCare-Edge-${config.env}`, {
+    stackName: `PostOpCare-Edge-${config.env}`,
+    env: { account: config.account, region: 'us-east-1' }, // CloudFront + WAF must be us-east-1
+    config,
+    storageStack,
+    computeStack,
+    // Consumes ap-south-1 Storage + Compute resources across regions.
+    crossRegionReferences: true,
+  });
+  edgeStack.addDependency(storageStack);
+  edgeStack.addDependency(computeStack);
+  tagStack(edgeStack);
+}
 
 app.synth();

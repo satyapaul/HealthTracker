@@ -6,6 +6,7 @@ import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as apigatewayv2Authorizers from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
@@ -81,6 +82,32 @@ export class ComputeStack extends cdk.Stack {
     } = props;
     const isProd = config.env === 'prod';
 
+    // ── Pre-existing Secrets Manager secrets (OAuth/JWT/SMS) ─────────────────
+    // Looked up by name via the L2 so `.secretArn` resolves to the full ARN
+    // (including the random 6-char suffix) at deploy time. Interpolating the
+    // suffixless ARN as a string identifies no real resource and fails the
+    // changeset early-validation existence check.
+    const googleSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'GoogleClientSecret',
+      `postopcare/google-client-secret-${config.env}`
+    );
+    const xSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'XClientSecret',
+      `postopcare/x-client-secret-${config.env}`
+    );
+    const jwtSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'JwtSecret',
+      `postopcare/jwt-secret-${config.env}`
+    );
+    const smsSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'SmsApiSecret',
+      `postopcare/sms-api-secret-${config.env}`
+    );
+
     // ── Step 1: Common Lambda environment variables ──────────────────────────
     const commonEnv: Record<string, string> = {
       DB_PROXY_ENDPOINT: databaseStack.proxy.endpoint,
@@ -110,11 +137,15 @@ export class ComputeStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         ...commonEnv,
-        // Placeholders — replace with real Secrets Manager ARNs before deploy.
-        GOOGLE_CLIENT_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/google-client-secret-${config.env}`,
-        X_CLIENT_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/x-client-secret-${config.env}`,
-        JWT_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/jwt-secret-${config.env}`,
-        SMS_API_SECRET_ARN: `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/sms-api-secret-${config.env}`,
+        // Pass the secret NAMES (not fabricated ARNs). Secrets Manager
+        // GetSecretValue accepts a name/partial-ARN, and a name string is not
+        // ARN-shaped, so it is not flagged by the CloudFormation early-validation
+        // ResourceExistenceCheck (a suffixless fabricated ARN was). The IAM
+        // grantRead() statements below use the real resolved ARN.
+        GOOGLE_CLIENT_SECRET_ID: googleSecret.secretName,
+        X_CLIENT_SECRET_ID: xSecret.secretName,
+        JWT_SECRET_ID: jwtSecret.secretName,
+        SMS_API_SECRET_ID: smsSecret.secretName,
       },
       ...vpcConfig,
     });
@@ -352,20 +383,14 @@ export class ComputeStack extends cdk.Stack {
       );
     }
 
-    // Also grant auth function access to its own secrets (Google, X, JWT, SMS).
-    this.authFn.addToRolePolicy(
-      new iam.PolicyStatement({
-        sid: 'AuthSecretsRead',
-        effect: iam.Effect.ALLOW,
-        actions: ['secretsmanager:GetSecretValue'],
-        resources: [
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/google-client-secret-${config.env}*`,
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/x-client-secret-${config.env}*`,
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/jwt-secret-${config.env}*`,
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:postopcare/sms-api-secret-${config.env}*`,
-        ],
-      })
-    );
+    // Also grant auth function read access to its own secrets (Google, X, JWT,
+    // SMS). grantRead emits a correctly-scoped identity policy against each
+    // resolved (suffixed) secret ARN — existence-check-safe. Only authFn needs
+    // these; the authorizerFn and other functions must NOT receive them.
+    googleSecret.grantRead(this.authFn.function);
+    xSecret.grantRead(this.authFn.function);
+    jwtSecret.grantRead(this.authFn.function);
+    smsSecret.grantRead(this.authFn.function);
 
     // S3 access
     storageStack.labReportsBucket.grantReadWrite(this.followupFn.function);
