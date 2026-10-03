@@ -57,7 +57,10 @@ export class DatabaseStack extends cdk.Stack {
     this.cluster = new rds.DatabaseCluster(this, 'AuroraCluster', {
       clusterIdentifier: `postopcare-aurora-${config.env}`,
       engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_16_3,
+        // aws-cdk-lib 2.155.0 ships constants only up to VER_16_3, and
+        // ap-south-1 does not offer Aurora PostgreSQL 16.3 (available: 16.6+).
+        // Use the escape hatch to pin a region-available version.
+        version: rds.AuroraPostgresEngineVersion.of('16.8', '16'),
       }),
       credentials: rds.Credentials.fromGeneratedSecret('postopcare_master', {
         secretName: `postopcare/db/master/${config.env}`,
@@ -96,7 +99,8 @@ export class DatabaseStack extends cdk.Stack {
       iamAuthentication: false, // Using Secrets Manager auth via RDS Proxy
       parameterGroup: new rds.ParameterGroup(this, 'ClusterParamGroup', {
         engine: rds.DatabaseClusterEngine.auroraPostgres({
-          version: rds.AuroraPostgresEngineVersion.VER_16_3,
+          // Must match the cluster engine version above (16.8 via escape hatch).
+          version: rds.AuroraPostgresEngineVersion.of('16.8', '16'),
         }),
         description: `PostOp Care Aurora parameter group (${config.env})`,
         parameters: {
