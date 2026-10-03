@@ -60,7 +60,7 @@ export class NetworkingStack extends cdk.Stack {
     this.lambdaSG = new ec2.SecurityGroup(this, 'LambdaSG', {
       vpc: this.vpc,
       securityGroupName: `postopcare-lambda-sg-${config.env}`,
-      description: 'PostOp Care Lambda functions — outbound only',
+      description: 'PostOp Care Lambda functions - outbound only',
       allowAllOutbound: true,
     });
 
@@ -72,7 +72,7 @@ export class NetworkingStack extends cdk.Stack {
     this.redisSG = new ec2.SecurityGroup(this, 'RedisSG', {
       vpc: this.vpc,
       securityGroupName: `postopcare-redis-sg-${config.env}`,
-      description: 'PostOp Care ElastiCache Redis — Lambda access only',
+      description: 'PostOp Care ElastiCache Redis - Lambda access only',
       allowAllOutbound: false,
     });
     this.redisSG.addIngressRule(

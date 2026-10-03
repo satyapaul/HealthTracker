@@ -33,7 +33,7 @@ export class DatabaseStack extends cdk.Stack {
     this.rdsSG = new ec2.SecurityGroup(this, 'RdsSG', {
       vpc: networkingStack.vpc,
       securityGroupName: `postopcare-rds-sg-${config.env}`,
-      description: 'PostOp Care Aurora PostgreSQL — Lambda access only',
+      description: 'PostOp Care Aurora PostgreSQL - Lambda access only',
       allowAllOutbound: false,
     });
     this.rdsSG.addIngressRule(

@@ -465,7 +465,7 @@ export class ComputeStack extends cdk.Stack {
     // ── Step 6: HTTP API Gateway ─────────────────────────────────────────────
     this.httpApi = new apigatewayv2.HttpApi(this, 'HttpApi', {
       apiName: `postopcare-api-${config.env}`,
-      description: 'PostOpCare REST API — custom JWT auth (no Cognito)',
+      description: 'PostOpCare REST API - custom JWT auth (no Cognito)',
       corsPreflight: {
         allowOrigins: [`https://${config.domainName}`],
         allowMethods: [apigatewayv2.CorsHttpMethod.ANY],

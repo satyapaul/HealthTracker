@@ -175,7 +175,7 @@ export class ObservabilityStack extends cdk.Stack {
     for (const channel of notificationChannels) {
       const dlqAlarm = new cloudwatch.Alarm(this, `${channel.id}DlqAlarm`, {
         alarmName: `postopcare-${channel.slug}-dlq-not-empty-${env}`,
-        alarmDescription: `Messages landed in the ${channel.id} notification DLQ — requires investigation`,
+        alarmDescription: `Messages landed in the ${channel.id} notification DLQ - requires investigation`,
         metric: channel.queue.dlq.metricApproximateNumberOfMessagesVisible({
           period: cdk.Duration.minutes(1),
           statistic: 'Maximum',

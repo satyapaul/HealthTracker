@@ -47,7 +47,7 @@ export class NotificationQueue extends Construct {
     // Alarm on DLQ depth
     this.dlqAlarm = new cloudwatch.Alarm(this, 'DLQAlarm', {
       alarmName: `${props.queueName}-dlq-not-empty`,
-      alarmDescription: `Messages in DLQ for ${props.queueName} — requires investigation`,
+      alarmDescription: `Messages in DLQ for ${props.queueName} - requires investigation`,
       metric: this.dlq.metricApproximateNumberOfMessagesVisible({
         period: cdk.Duration.minutes(1),
         statistic: 'Maximum',

@@ -15,8 +15,9 @@
     "deploy:redis": "cdk deploy PostOpCare-Redis-* --require-approval never",
     "deploy:storage": "cdk deploy PostOpCare-Storage-* --require-approval never",
     "deploy:messaging": "cdk deploy PostOpCare-Messaging-* --require-approval never",
+    "deploy:data": "cdk deploy PostOpCare-Data-* --require-approval never",
     "deploy:compute": "cdk deploy PostOpCare-Compute-* --require-approval never",
-    "deploy:dataops": "cdk deploy PostOpCare-DataOps-* --require-approval never",
+    "deploy:observability": "cdk deploy PostOpCare-Observability-* --require-approval never",
     "deploy:edge": "cdk deploy PostOpCare-Edge-* --require-approval never"
   },
   "dependencies": {
