@@ -12,6 +12,7 @@ import { handleUpdateRow } from './handlers/update-row';
 import { handleSubmitRow } from './handlers/submit-row';
 import { handleGetRow } from './handlers/get-row';
 import { handleListRows } from './handlers/list-rows';
+import { handleListPatientRows } from './handlers/list-patient-rows';
 import { handlePresignAttachment } from './handlers/presign-attachment';
 import { handleConfirmAttachment } from './handlers/confirm-attachment';
 import { handleListAttachments } from './handlers/list-attachments';
@@ -35,6 +36,14 @@ function resolve(
   if (p === '/followup/rows') {
     if (m === 'POST') return { handler: handleCreateRow, pathParams: {} };
     if (m === 'GET') return { handler: handleListRows, pathParams: {} };
+    return null;
+  }
+
+  // /followup/patients/{patientId}/rows — doctor/admin read of a patient chart.
+  const patientRowsMatch = /^\/followup\/patients\/([^/]+)\/rows$/.exec(p);
+  if (patientRowsMatch) {
+    const patientId = decodeURIComponent(patientRowsMatch[1]);
+    if (m === 'GET') return { handler: handleListPatientRows, pathParams: { patientId } };
     return null;
   }
 

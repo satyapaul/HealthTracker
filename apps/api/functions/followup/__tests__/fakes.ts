@@ -67,15 +67,24 @@ export class FakeHospital implements HospitalPort {
  *   - patient/caregiver: only rows with patient_id === ctx.patientId visible;
  *     UPDATE allowed only while status === 'draft'.
  *   - admin: all rows visible.
- *   - doctor: no rows (policy deferred to Phase 6).
+ *   - doctor: rows for assigned patients only (mirrors the V6 fur_doctor_select
+ *     policy joined through doctor_patient_assignments); unassigned -> none.
  */
 export class FakeDb implements DbPort, FollowupRepository, AttachmentRepository {
   public rows = new Map<string, FollowupRowRecord>();
   public attachments: AttachmentRecord[] = [];
   public contexts: SessionContext[] = [];
+  /** doctorUserId -> set of patientIds the doctor is assigned to (V6 join). */
+  public assignments = new Map<string, Set<string>>();
   private ctx: SessionContext | null = null;
 
   constructor(private clock: Clock) {}
+
+  /** Test helper: assign a doctor to a patient (doctor_patient_assignments). */
+  assign(doctorUserId: string, patientId: string): void {
+    if (!this.assignments.has(doctorUserId)) this.assignments.set(doctorUserId, new Set());
+    this.assignments.get(doctorUserId)!.add(patientId);
+  }
 
   async transaction<T>(
     fn: (repo: FollowupRepository & AttachmentRepository) => Promise<T>
@@ -94,6 +103,10 @@ export class FakeDb implements DbPort, FollowupRepository, AttachmentRepository 
     if (ctx.role === 'admin') return true;
     if (ctx.role === 'patient' || ctx.role === 'caregiver') {
       return !!ctx.patientId && row.patientId === ctx.patientId;
+    }
+    if (ctx.role === 'doctor') {
+      // V6 fur_doctor_select: visible only for assigned patients.
+      return this.assignments.get(ctx.userId)?.has(row.patientId) ?? false;
     }
     return false;
   }

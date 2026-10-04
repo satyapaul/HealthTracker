@@ -83,6 +83,9 @@ export const doctorApi = {
     api.get<{ patients: DoctorPatientEntry[] }>('/patients', {
       query: hospitalId ? { hospital_id: hospitalId } : undefined,
     }),
+  /** A specific patient's follow-up rows across dates (RLS: assigned only). */
+  getPatientRows: (patientId: string) =>
+    api.get<{ rows: FollowUpRow[] }>(`/followup/patients/${patientId}/rows`),
 };
 
 // ── Hospitals (WP 3.1 / 3.3) ────────────────────────────────────────────────

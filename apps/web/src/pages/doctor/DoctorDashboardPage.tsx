@@ -12,16 +12,17 @@ import { FlowChartTable, FlowChartLegend } from '../../features/doctor/FlowChart
  * renders the selected patient's post-op flow chart with High/Warn/Normal
  * coding + legend and an "Update Post-Op Orders" action.
  *
- * NOTE: a doctor-facing endpoint to read a patient's follow-up rows across
- * dates does not exist yet (the followup list is patient-RLS-scoped). Until
- * that WP lands, the flow chart renders from `rows` when provided and shows an
- * explicit "chart data source pending" state otherwise — the patient list and
- * the whole chart UI (ranges, coding, legend, scroll) are fully functional.
+ * The flow chart is fed by GET /followup/patients/{id}/rows (RLS: an assigned
+ * doctor sees only their patients' rows). When a selected patient has no rows,
+ * a graceful empty state + the legend are shown.
  */
 export function DoctorDashboardPage() {
   const [entries, setEntries] = useState<DoctorPatientEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rows, setRows] = useState<FollowUpRow[] | null>(null);
+  const [rowsError, setRowsError] = useState<string | null>(null);
+  const [rowsLoading, setRowsLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -40,13 +41,34 @@ export function DoctorDashboardPage() {
     };
   }, []);
 
+  // Load the selected patient's chart rows.
+  useEffect(() => {
+    if (!selectedId) {
+      setRows(null);
+      return;
+    }
+    let active = true;
+    setRowsLoading(true);
+    setRowsError(null);
+    doctorApi
+      .getPatientRows(selectedId)
+      .then((r) => active && setRows(r.rows))
+      .catch((err) => {
+        if (active)
+          setRowsError(err instanceof ApiError ? err.message : 'Could not load the chart.');
+      })
+      .finally(() => active && setRowsLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [selectedId]);
+
   const selected = useMemo(
     () => (entries ?? []).find((e) => e.patient.id === selectedId) ?? null,
     [entries, selectedId]
   );
 
-  // No doctor-rows endpoint yet; render from an (empty) rows source for now.
-  const rows: FollowUpRow[] = [];
+  const chartRows: FollowUpRow[] = rows ?? [];
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
@@ -155,22 +177,27 @@ export function DoctorDashboardPage() {
             )}
           </div>
 
-          {rows.length === 0 ? (
+          {rowsLoading && <p style={{ color: 'var(--color-text-muted)' }}>Loading chart…</p>}
+          {rowsError && !rowsLoading && (
             <Card>
-              <p style={{ fontWeight: 600 }}>Chart data source pending</p>
+              <p style={{ color: 'var(--color-text-muted)' }}>{rowsError}</p>
+            </Card>
+          )}
+          {!rowsLoading && !rowsError && chartRows.length === 0 && (
+            <Card>
+              <p style={{ fontWeight: 600 }}>No submissions yet</p>
               <p style={{ color: 'var(--color-text-muted)', marginTop: '6px' }}>
-                The flow chart renders a patient’s dated submissions with range coding. A
-                doctor-facing endpoint to read a patient’s rows is a planned backend work package;
-                once wired, this table populates automatically. The patient list and chart UI below
-                are fully functional.
+                This patient has not submitted any follow-up rows. Once they do, their dated results
+                appear here with range coding.
               </p>
               <div style={{ marginTop: '16px' }}>
                 <FlowChartLegend />
               </div>
             </Card>
-          ) : (
+          )}
+          {!rowsLoading && !rowsError && chartRows.length > 0 && (
             <>
-              <FlowChartTable rows={rows} />
+              <FlowChartTable rows={chartRows} />
               <FlowChartLegend />
             </>
           )}

@@ -294,3 +294,43 @@ export async function listRows(
 
   return rows;
 }
+
+/**
+ * List a SPECIFIC patient's rows for a doctor or admin (the chart feed for the
+ * doctor dashboard). Authorization is enforced by RLS, not by this code: the
+ * query runs under the caller's doctor/admin session context, and the V6
+ * `fur_doctor_select` policy (joined through doctor_patient_assignments) returns
+ * only rows for patients the doctor is assigned to — an unassigned doctor gets
+ * an empty list, which is the correct non-leaking behavior. Admins see all rows
+ * via `fur_admin_all`. Patient/caregiver roles are rejected (they have their own
+ * `listRows`).
+ */
+export async function listRowsForPatient(
+  deps: FollowupDeps,
+  principal: Principal,
+  patientId: string
+): Promise<FollowupRowView[]> {
+  if (principal.role !== 'doctor' && principal.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only a doctor or admin may read a patient chart');
+  }
+  if (!patientId || patientId.trim() === '') {
+    throw new AppError('VALIDATION_ERROR', "Path parameter 'patientId' is required", {
+      field: 'patientId',
+    });
+  }
+  const ctx: SessionContext = { userId: principal.userId, role: principal.role, patientId: null };
+
+  const rows = await deps.db.transaction(async (repo) => {
+    await repo.setSessionContext(ctx);
+    return repo.listRowsForPatient(patientId.trim());
+  });
+
+  deps.logger.info('followup.row.list_for_doctor', {
+    patientId: patientId.trim(),
+    userId: principal.userId,
+    role: principal.role,
+    count: rows.length,
+  });
+
+  return rows;
+}
