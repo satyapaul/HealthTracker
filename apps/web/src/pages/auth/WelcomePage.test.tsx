@@ -25,12 +25,13 @@ describe('WelcomePage', () => {
     expect(screen.getByText(`Secure login for ${branding.appName}`)).toBeInTheDocument();
   });
 
-  it('offers the three OAuth providers and SMS OTP', () => {
+  it('offers Google + Facebook OAuth and SMS OTP (no Apple)', () => {
     renderWelcome();
     expect(screen.getByRole('button', { name: /Continue with Google/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Continue with Apple/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue with Facebook/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Send OTP/i })).toBeInTheDocument();
+    // Apple sign-in was removed.
+    expect(screen.queryByRole('button', { name: /Continue with Apple/i })).not.toBeInTheDocument();
   });
 
   it('validates the phone number before requesting an OTP', async () => {

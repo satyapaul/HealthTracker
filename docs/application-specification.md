@@ -1185,7 +1185,7 @@ The MVP is accepted when:
 4. Dose changes are visibly distinguished and stored in an audit log.
 5. The chart can be exported/printed in a layout recognizable to users of the paper form.
 6. Only authorized users can access a given patient's PHI.
-7. Users can sign in via **Google OAuth**, **X OAuth**, **Facebook Login**, or **SMS OTP** and reach the correct portal for their role.
+7. Users can sign in via **Google OAuth**, **X OAuth**, **Facebook Login**, or **SMS OTP** and reach the correct portal for their role. (**Apple Sign In is out of scope** — the welcome mock showed an Apple option, but it is not a supported provider.)
 8. Failed logins, OTP attempts, and sign-outs are recorded in the authentication audit log.
 9. Milestones are auto-generated from the post-op protocol and rolling follow-up interval.
 10. Patients receive automated **SMS and/or WhatsApp** reminders before and on milestone due dates, per their preferences.
