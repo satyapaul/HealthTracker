@@ -48,6 +48,28 @@ export interface FollowUpRow {
   updatedAt: string;
 }
 
+export interface DoctorResponse {
+  id: string;
+  followUpRowId: string;
+  doctorId: string;
+  additionalTests: unknown[];
+  additionalMedications: string | null;
+  clinicalNotes: string | null;
+  nextFollowupIntervalDays: number | null;
+  sentAt: string;
+}
+
+export interface DoseChange {
+  id: string;
+  followUpRowId: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changedBy: string;
+  changedAt: string;
+  reason: string | null;
+}
+
 export interface HospitalSummary {
   id: string;
   hospitalCode: string;

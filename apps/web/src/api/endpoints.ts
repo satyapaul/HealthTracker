@@ -3,7 +3,13 @@
  * route the SPA calls; keeps components free of path/shape details.
  */
 import { api } from './client';
-import type { FollowUpRow, HospitalSummary, PatientChart } from './types';
+import type {
+  DoctorResponse,
+  DoseChange,
+  FollowUpRow,
+  HospitalSummary,
+  PatientChart,
+} from './types';
 
 // ── Auth (SPEC §12 / WP 1.1) ────────────────────────────────────────────────
 export interface OtpRequestResult {
@@ -53,6 +59,30 @@ export const followupApi = {
   createDraft: (body: CreateFollowUpBody) => api.post<FollowUpRow>('/followup/rows', body),
   /** Submit a draft for doctor review (status -> 'pending'). */
   submit: (rowId: string) => api.put<FollowUpRow>(`/followup/rows/${rowId}/submit`),
+  /** Read a single row. */
+  getRow: (rowId: string) => api.get<FollowUpRow>(`/followup/rows/${rowId}`),
+};
+
+// ── Doctor response + dose changes (WP 2.3) ─────────────────────────────────
+export const doseApi = {
+  getResponse: (rowId: string) => api.get<DoctorResponse>(`/followup/rows/${rowId}/response`),
+  getDoseChanges: (rowId: string) =>
+    api.get<{ doseChanges: DoseChange[] }>(`/followup/rows/${rowId}/dose-changes`),
+};
+
+// ── Doctor dashboard (WP 3.4 / D-13) ────────────────────────────────────────
+export interface DoctorPatientEntry {
+  patient: PatientChart;
+  pendingSubmissionCount: number;
+  hasPending: boolean;
+}
+
+export const doctorApi = {
+  /** Assigned patients + pending badges; optional hospital filter (D-13). */
+  listPatients: (hospitalId?: string) =>
+    api.get<{ patients: DoctorPatientEntry[] }>('/patients', {
+      query: hospitalId ? { hospital_id: hospitalId } : undefined,
+    }),
 };
 
 // ── Hospitals (WP 3.1 / 3.3) ────────────────────────────────────────────────

@@ -1,16 +1,22 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { PatientShell } from './ui';
-import { RequireAuth } from './auth/RequireAuth';
+import { RequireAuth, homePathForRole } from './auth/RequireAuth';
+import { useSession } from './auth/useSession';
+import { SplashPage } from './pages/auth/SplashPage';
 import { WelcomePage } from './pages/auth/WelcomePage';
 import { HomePage } from './pages/patient/HomePage';
 import { SubmitFollowUpPage } from './pages/patient/SubmitFollowUpPage';
+import { FollowUpHistoryPage } from './pages/patient/FollowUpHistoryPage';
+import { ResponseDetailPage } from './pages/patient/ResponseDetailPage';
+import { DoctorDashboardPage } from './pages/doctor/DoctorDashboardPage';
 import { Placeholder } from './pages/Placeholder';
 
 /**
  * App routes, grouped by portal:
+ *   /splash             public welcome splash (Get Started)
  *   /welcome            public auth (OAuth + SMS OTP)
  *   /app/*              patient portal (bottom-tab shell)
- *   /doctor, /admin     doctor + admin portals (scaffolded; built in later WPs)
+ *   /doctor, /admin     doctor + admin portals
  *
  * Role-aware guards (RequireAuth) gate each group; the API + RLS remain the
  * real authorization boundary.
@@ -18,15 +24,24 @@ import { Placeholder } from './pages/Placeholder';
 export function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/app/home" replace />} />
+      <Route path="/" element={<RootRedirect />} />
+      <Route path="/splash" element={<SplashPage />} />
       <Route path="/welcome" element={<WelcomePage />} />
 
-      {/* Patient full-screen follow-up wizard (outside the tab shell) */}
+      {/* Patient full-screen flows (outside the tab shell) */}
       <Route
         path="/app/submit"
         element={
           <RequireAuth roles={['patient', 'caregiver']}>
             <SubmitFollowUpPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/app/rows/:rowId/response"
+        element={
+          <RequireAuth roles={['patient', 'caregiver']}>
+            <ResponseDetailPage />
           </RequireAuth>
         }
       />
@@ -41,15 +56,12 @@ export function App() {
         }
       />
 
-      {/* Doctor portal (scaffold) */}
+      {/* Doctor portal */}
       <Route
         path="/doctor/*"
         element={
           <RequireAuth roles={['doctor']}>
-            <Placeholder
-              title="Post-Op Monitoring"
-              note="Doctor dashboard — built in a later work package."
-            />
+            <DoctorDashboardPage />
           </RequireAuth>
         }
       />
@@ -67,9 +79,15 @@ export function App() {
         }
       />
 
-      <Route path="*" element={<Navigate to="/app/home" replace />} />
+      <Route path="*" element={<RootRedirect />} />
     </Routes>
   );
+}
+
+/** Send signed-in users to their portal; everyone else to the splash. */
+function RootRedirect() {
+  const session = useSession();
+  return <Navigate to={session ? homePathForRole(session.role) : '/splash'} replace />;
 }
 
 /** Patient tab routes rendered inside the bottom-tab shell. */
@@ -78,10 +96,7 @@ function PatientRoutes() {
     <PatientShell>
       <Routes>
         <Route path="home" element={<HomePage />} />
-        <Route
-          path="chart"
-          element={<Placeholder title="Chart" note="Your post-op flow chart." />}
-        />
+        <Route path="chart" element={<FollowUpHistoryPage />} />
         <Route path="chat" element={<Placeholder title="Chat" note="Message your care team." />} />
         <Route
           path="care-team"
