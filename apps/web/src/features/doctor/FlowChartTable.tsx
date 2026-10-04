@@ -56,8 +56,8 @@ export function FlowChartTable({ rows }: FlowChartTableProps) {
 
   return (
     <div
+      className="scroll-x"
       style={{
-        overflowX: 'auto',
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius-lg)',
       }}

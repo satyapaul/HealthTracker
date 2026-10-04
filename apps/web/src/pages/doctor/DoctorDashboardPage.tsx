@@ -96,17 +96,7 @@ export function DoctorDashboardPage() {
         </div>
       </header>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(240px, 300px) 1fr',
-          gap: '24px',
-          padding: '24px',
-          maxWidth: '1200px',
-          margin: '0 auto',
-          alignItems: 'start',
-        }}
-      >
+      <div className="doctor-dashboard-grid">
         {/* Patient list */}
         <aside style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <h2 style={{ fontSize: '16px', fontWeight: 700 }}>Assigned Patients</h2>

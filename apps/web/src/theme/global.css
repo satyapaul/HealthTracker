@@ -41,6 +41,23 @@ body,
   height: 100%;
 }
 
+/* Responsiveness guard: never let a single wide child scroll the whole page.
+   Wide data tables (e.g. the doctor flow chart) opt back IN to horizontal
+   scroll on their OWN container, which stays contained by this rule. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Media/replaced elements shouldn't exceed their container. */
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
 body {
   margin: 0;
   background: var(--color-bg);
@@ -72,6 +89,35 @@ a {
 :focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+/* Doctor dashboard: two columns (patient list + chart) on wide screens,
+   stacked to one column on narrow screens so the PAGE never scrolls sideways.
+   The chart's own data table opts back into horizontal scroll inside its box. */
+.doctor-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .doctor-dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+}
+
+/* Horizontal-scroll container for wide data tables (the intentional
+   exception). Stays within the viewport; the table scrolls inside it. */
+.scroll-x {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Respect reduced-motion preferences. */
