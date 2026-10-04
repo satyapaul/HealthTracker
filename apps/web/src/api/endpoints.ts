@@ -34,7 +34,7 @@ export const authApi = {
 };
 
 /** OAuth providers shown on the welcome screen (redirect-based). */
-export type OAuthProvider = 'google' | 'facebook';
+export type OAuthProvider = 'google' | 'x' | 'facebook';
 
 // ── Patient chart + follow-up (WP 2.1 / 2.2 / 3.3) ──────────────────────────
 export const patientApi = {

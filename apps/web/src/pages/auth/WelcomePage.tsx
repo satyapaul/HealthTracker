@@ -8,7 +8,7 @@ import { OtpVerifyPanel } from './OtpVerifyPanel';
 
 /**
  * Welcome / sign-in screen (mock: RecoverEase-WelcomeBack). Offers OAuth
- * (Google/Facebook) and SMS OTP. Branding copy is config-driven — the product
+ * (Google/X/Facebook) and SMS OTP. Branding copy is config-driven — the product
  * name comes from branding.appName, never hardcoded here.
  */
 export function WelcomePage() {
@@ -84,6 +84,9 @@ export function WelcomePage() {
           <Button variant="secondary" size="lg" block onClick={() => onOAuth('google')}>
             Continue with Google
           </Button>
+          <Button variant="secondary" size="lg" block onClick={() => onOAuth('x')}>
+            Continue with X
+          </Button>
           <Button variant="secondary" size="lg" block onClick={() => onOAuth('facebook')}>
             Continue with Facebook
           </Button>
@@ -149,5 +152,5 @@ export function WelcomePage() {
 }
 
 function labelFor(p: OAuthProvider): string {
-  return p === 'google' ? 'Google' : 'Facebook';
+  return p === 'google' ? 'Google' : p === 'x' ? 'X' : 'Facebook';
 }
