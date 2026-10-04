@@ -177,12 +177,15 @@ async function deliver(
     }
   }
 
-  // Offline recipients + urgency alerts are handled by the dispatcher.
+  // Offline recipients + urgency alerts are handled by the dispatcher. A
+  // symptom_concern message escalates (C-07): the dispatcher adds a doctor-
+  // dashboard triage alert + SMS/WhatsApp on top of the normal fan-out.
   await deps.queue.chatMessageReceived({
     threadId,
     messageId: message.id,
     patientId: '', // dispatcher resolves recipients; patientId not needed here
     urgencyFlag: message.urgencyFlag,
+    escalate: message.urgencyFlag === 'symptom_concern',
     recipientUserIds,
   });
 }
@@ -263,6 +266,7 @@ export async function postSystemCard(
     messageId: card.id,
     patientId: cmd.patientId,
     urgencyFlag: card.urgencyFlag,
+    escalate: false, // system cards are informational, never a triage escalation
     recipientUserIds: recipients,
   });
 
@@ -273,6 +277,104 @@ export async function postSystemCard(
   });
 
   return { messageId: card.id, threadId };
+}
+
+// ── Read receipts (WP 5.3 — C-05) ────────────────────────────────────────────
+
+export interface MarkReadCommand {
+  threadId: string;
+  messageIds: string[];
+}
+
+export interface MarkReadResult {
+  updated: number;
+}
+
+/**
+ * Mark messages read by the caller (C-05). Appends the reader to each message's
+ * read_by_user_ids (idempotent, via chat_mark_read), then pushes read receipts
+ * to the other connected thread members. Requires thread membership (RLS).
+ */
+export async function markRead(
+  deps: ChatDeps,
+  principal: Principal,
+  cmd: MarkReadCommand
+): Promise<MarkReadResult> {
+  const ctx = sessionContext(principal);
+
+  const recipients = await deps.db.transaction(async (repo) => {
+    await repo.setSessionContext(ctx);
+    const thread = await repo.findThreadById(cmd.threadId);
+    if (!thread) {
+      throw new AppError('FORBIDDEN', 'Not a member of this thread');
+    }
+    for (const messageId of cmd.messageIds) {
+      await repo.markRead(messageId, principal.userId);
+    }
+    return repo.threadMemberUserIds(cmd.threadId, principal.userId);
+  });
+
+  // Push read receipts to the other connected members (ids only, no PHI).
+  for (const userId of recipients) {
+    const connectionId = await deps.connections.connectionFor(userId);
+    if (connectionId) {
+      await deps.connections.push(connectionId, {
+        type: 'chat.read',
+        threadId: cmd.threadId,
+        messageIds: cmd.messageIds,
+        readerUserId: principal.userId,
+      });
+    }
+  }
+
+  deps.logger.info('chat.read', {
+    threadId: cmd.threadId,
+    userId: principal.userId,
+    count: cmd.messageIds.length,
+  });
+
+  return { updated: cmd.messageIds.length };
+}
+
+// ── Typing indicator (WP 5.3 — ephemeral, no DB) ─────────────────────────────
+
+export interface TypingCommand {
+  threadId: string;
+  isTyping: boolean;
+}
+
+/**
+ * Broadcast an ephemeral typing indicator to the other connected thread
+ * members. No DB write, no notification fan-out (LLD §3.14). Requires
+ * membership (RLS).
+ */
+export async function typing(
+  deps: ChatDeps,
+  principal: Principal,
+  cmd: TypingCommand
+): Promise<void> {
+  const ctx = sessionContext(principal);
+
+  const recipients = await deps.db.transaction(async (repo) => {
+    await repo.setSessionContext(ctx);
+    const thread = await repo.findThreadById(cmd.threadId);
+    if (!thread) {
+      throw new AppError('FORBIDDEN', 'Not a member of this thread');
+    }
+    return repo.threadMemberUserIds(cmd.threadId, principal.userId);
+  });
+
+  for (const userId of recipients) {
+    const connectionId = await deps.connections.connectionFor(userId);
+    if (connectionId) {
+      await deps.connections.push(connectionId, {
+        type: 'chat.typing',
+        threadId: cmd.threadId,
+        userId: principal.userId,
+        isTyping: cmd.isTyping,
+      });
+    }
+  }
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────────

@@ -20,8 +20,12 @@ import {
   sendMessage,
   listThreads,
   listMessages,
+  markRead,
+  typing,
   type Principal,
   type SendMessageCommand,
+  type MarkReadCommand,
+  type TypingCommand,
 } from './services/chat-service';
 
 type UserRole = 'patient' | 'caregiver' | 'doctor' | 'admin';
@@ -106,8 +110,17 @@ export const handlerWithDeps = (deps: ChatDeps) => {
   return (event: ApiGatewayEvent): Promise<HttpResponse> => routeHttp(deps, event);
 };
 
-// ── WebSocket sendMessage action ──────────────────────────────────────────────
-/** The chat service's sendMessage, exposed for the WebSocket route adapter. */
+// ── WebSocket actions (sendMessage / markRead / typing) ───────────────────────
+// Thin pass-throughs the WebSocket route adapter invokes once it has resolved
+// the principal from the Redis ws:conn store.
 export async function wsSendMessage(deps: ChatDeps, principal: Principal, cmd: SendMessageCommand) {
   return sendMessage(deps, principal, cmd);
+}
+
+export async function wsMarkRead(deps: ChatDeps, principal: Principal, cmd: MarkReadCommand) {
+  return markRead(deps, principal, cmd);
+}
+
+export async function wsTyping(deps: ChatDeps, principal: Principal, cmd: TypingCommand) {
+  return typing(deps, principal, cmd);
 }

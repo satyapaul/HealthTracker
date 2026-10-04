@@ -9,6 +9,8 @@ import {
   listThreads,
   listMessages,
   postSystemCard,
+  markRead,
+  typing,
   type Principal,
 } from '../services/chat-service';
 import { makeBundle } from './fakes';
@@ -242,6 +244,94 @@ describe('postSystemCard (C-03, WP 5.2)', () => {
     expect(b.connections.pushes.map((p) => p.connectionId)).toEqual(['conn-d1']);
     // The push frame carries ids only (the body is read under RLS).
     expect(b.connections.pushes[0].payload).not.toHaveProperty('body');
+  });
+});
+
+describe('urgency triage escalation (C-07, WP 5.3 DoD)', () => {
+  it('a symptom_concern message publishes ChatMessageReceived with escalate=true', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await sendMessage(b.deps, patient('p1'), {
+      threadId,
+      body: 'My incision is red and swollen',
+      urgencyFlag: 'symptom_concern',
+    });
+    expect(b.queue.events).toHaveLength(1);
+    expect(b.queue.events[0].urgencyFlag).toBe('symptom_concern');
+    expect(b.queue.events[0].escalate).toBe(true);
+  });
+
+  it('a routine_query message does NOT escalate', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await sendMessage(b.deps, patient('p1'), { threadId, body: 'quick question' });
+    expect(b.queue.events[0].escalate).toBe(false);
+  });
+
+  it('always publishes ChatMessageReceived for offline fan-out (dispatcher handles push)', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await sendMessage(b.deps, patient('p1'), { threadId, body: 'hi' });
+    expect(b.queue.events).toHaveLength(1);
+    expect(b.queue.events[0].recipientUserIds).toEqual(['d1']);
+  });
+});
+
+describe('markRead (C-05 read receipts)', () => {
+  it('marks each message read and pushes receipts to connected members', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    b.connections.connect('d1', 'conn-d1');
+    const res = await markRead(b.deps, patient('p1'), {
+      threadId,
+      messageIds: ['m1', 'm2'],
+    });
+    expect(res.updated).toBe(2);
+    expect(b.db.reads.get('m1')?.has('u-p1')).toBe(true);
+    expect(b.db.reads.get('m2')?.has('u-p1')).toBe(true);
+    // Receipt pushed to the other connected member (the doctor).
+    const receipt = b.connections.pushes.find((p) => p.payload.type === 'chat.read');
+    expect(receipt?.connectionId).toBe('conn-d1');
+    expect(receipt?.payload.readerUserId).toBe('u-p1');
+  });
+
+  it('is idempotent (re-marking the same message appends the reader once)', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await markRead(b.deps, patient('p1'), { threadId, messageIds: ['m1'] });
+    await markRead(b.deps, patient('p1'), { threadId, messageIds: ['m1'] });
+    expect(b.db.reads.get('m1')?.size).toBe(1);
+  });
+
+  it('DENIES markRead for a non-member (FORBIDDEN)', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await expect(
+      markRead(b.deps, patient('p2'), { threadId, messageIds: ['m1'] })
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('typing (ephemeral)', () => {
+  it('broadcasts a typing indicator to connected members with no DB write or event', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    b.connections.connect('d1', 'conn-d1');
+    await typing(b.deps, patient('p1'), { threadId, isTyping: true });
+    const frame = b.connections.pushes.find((p) => p.payload.type === 'chat.typing');
+    expect(frame?.connectionId).toBe('conn-d1');
+    expect(frame?.payload.isTyping).toBe(true);
+    // No message persisted and no event published.
+    expect(b.db.messages).toHaveLength(0);
+    expect(b.queue.events).toHaveLength(0);
+  });
+
+  it('DENIES typing for a non-member', async () => {
+    const b = makeBundle();
+    const threadId = seedCareTeam(b);
+    await expect(typing(b.deps, patient('p2'), { threadId, isTyping: true })).rejects.toMatchObject(
+      { code: 'FORBIDDEN' }
+    );
   });
 });
 

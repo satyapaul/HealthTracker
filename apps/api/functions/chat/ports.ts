@@ -94,6 +94,14 @@ export interface ChatRepository {
   insertSystemCard(input: NewSystemCardInput): Promise<MessageRecord>;
   /** The user ids to notify for a thread's patient (full membership). */
   threadAllMemberUserIds(threadId: string): Promise<string[]>;
+
+  // ── Read receipts (WP 5.3 — C-05) ────────────────────────────────────────
+  /**
+   * Append `readerId` to a message's read_by_user_ids via the chat_mark_read
+   * SECURITY DEFINER function (idempotent — appends once). The message must be
+   * one the reader can see (RLS); a non-visible id is a no-op.
+   */
+  markRead(messageId: string, readerId: string): Promise<void>;
 }
 
 export interface DbPort {
@@ -115,6 +123,12 @@ export interface ChatEventQueue {
     messageId: string;
     patientId: string;
     urgencyFlag: UrgencyFlag;
+    /**
+     * True when urgencyFlag === 'symptom_concern' (C-07): the dispatcher routes
+     * a doctor-dashboard triage alert + SMS/WhatsApp escalation in addition to
+     * the normal offline fan-out. Routing metadata only — no PHI.
+     */
+    escalate: boolean;
     recipientUserIds: string[];
   }): Promise<void>;
 }

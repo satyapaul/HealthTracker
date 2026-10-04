@@ -169,6 +169,14 @@ export class FakeDb implements DbPort, ChatRepository {
   async threadAllMemberUserIds(threadId: string): Promise<string[]> {
     return [...(this.threadMembers.get(threadId) ?? [])];
   }
+
+  // ── Read receipts (WP 5.3) ───────────────────────────────────────────────
+  /** messageId -> set of reader ids (mirrors read_by_user_ids, append-once). */
+  public reads = new Map<string, Set<string>>();
+  async markRead(messageId: string, readerId: string): Promise<void> {
+    if (!this.reads.has(messageId)) this.reads.set(messageId, new Set());
+    this.reads.get(messageId)!.add(readerId); // idempotent append
+  }
 }
 
 /** Records pushes; a user is "connected" if added via connect(). */
@@ -192,6 +200,7 @@ export class FakeQueue implements ChatEventQueue {
     threadId: string;
     messageId: string;
     urgencyFlag: UrgencyFlag;
+    escalate: boolean;
     recipientUserIds: string[];
   }[] = [];
   async chatMessageReceived(input: {
@@ -199,12 +208,14 @@ export class FakeQueue implements ChatEventQueue {
     messageId: string;
     patientId: string;
     urgencyFlag: UrgencyFlag;
+    escalate: boolean;
     recipientUserIds: string[];
   }): Promise<void> {
     this.events.push({
       threadId: input.threadId,
       messageId: input.messageId,
       urgencyFlag: input.urgencyFlag,
+      escalate: input.escalate,
       recipientUserIds: input.recipientUserIds,
     });
   }
