@@ -51,6 +51,14 @@ export interface NewMessageInput {
   isReleased: boolean;
 }
 
+/** A system card to append (WP 5.2 — C-03). sender_user_id is NULL. */
+export interface NewSystemCardInput {
+  id: string;
+  threadId: string;
+  body: string;
+  linkedFollowUpRowId: string | null;
+}
+
 export interface NewAttachmentInput {
   id: string;
   messageId: string;
@@ -78,6 +86,14 @@ export interface ChatRepository {
 
   /** The other user ids in a thread (for push fan-out), excluding `exceptUserId`. */
   threadMemberUserIds(threadId: string, exceptUserId: string): Promise<string[]>;
+
+  // ── System cards (WP 5.2) ────────────────────────────────────────────────
+  /** Find or create the patient_care_team thread for a patient; returns its id. */
+  ensureCareTeamThread(patientId: string, newThreadId: string): Promise<string>;
+  /** Append an immutable system card (sender_role='system', sender_user_id NULL). */
+  insertSystemCard(input: NewSystemCardInput): Promise<MessageRecord>;
+  /** The user ids to notify for a thread's patient (full membership). */
+  threadAllMemberUserIds(threadId: string): Promise<string[]>;
 }
 
 export interface DbPort {

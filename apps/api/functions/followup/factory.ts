@@ -14,6 +14,7 @@ import type { HospitalLookup } from './ports/hospital';
 import { DbHospitalPort } from './ports/hospital';
 import type { S3Port, UploadIntentCache } from './ports/storage';
 import type { ReminderCanceller } from './ports/reminders';
+import type { SystemCardPoster } from './ports/system-card';
 import { consoleLogger } from './logger';
 
 function notWiredDb(): DbPort {
@@ -101,6 +102,18 @@ function noopReminderCanceller(): ReminderCanceller {
   };
 }
 
+/**
+ * System-card poster: the real adapter (wired in infra) delegates to the chat
+ * domain's postSystemCard. Until then it no-ops so a submit still succeeds.
+ */
+function noopSystemCardPoster(): SystemCardPoster {
+  return {
+    async postFollowUpSubmitted() {
+      /* no-op until the chat adapter is wired */
+    },
+  };
+}
+
 const DEFAULT_CONFIG: FollowupConfig = {
   allowedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png'],
   maxUploadBytes: 20 * 1024 * 1024, // 20MB (LLD §4.3)
@@ -113,6 +126,7 @@ export function buildDeps(_env: NodeJS.ProcessEnv = process.env): FollowupDeps {
     hospital: new DbHospitalPort(notWiredHospitalLookup()),
     s3: notWiredS3(),
     reminders: noopReminderCanceller(),
+    systemCards: noopSystemCardPoster(),
     uploadIntents: notWiredUploadIntents(),
     clock: { now: () => new Date() },
     ids: { uuid: () => randomUUID() },

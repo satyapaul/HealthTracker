@@ -233,6 +233,19 @@ export async function submitRow(
   // not reminded. No-ops safely when there is no scheduled follow-up milestone.
   const cancellation = await deps.reminders.cancelPendingForFollowup(row.patientId, row.id);
 
+  // Post the C-03 system card into the care-team chat thread (incl. the hospital
+  // name — DoD). Resilient side effect: a card failure must not fail the submit.
+  try {
+    await deps.systemCards.postFollowUpSubmitted({
+      patientId: row.patientId,
+      followUpRowId: row.id,
+      ppDate: row.ppDate,
+      engagementHospitalName: row.engagementHospitalName,
+    });
+  } catch {
+    deps.logger.warn('followup.row.systemcard_failed', { rowId: row.id });
+  }
+
   deps.logger.info('followup.row.submitted', {
     rowId: row.id,
     patientId: row.patientId,

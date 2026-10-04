@@ -23,6 +23,9 @@ function notWiredDb(): DbPort {
         insertMessage: async () => fail(),
         insertAttachment: async () => fail(),
         threadMemberUserIds: async () => fail(),
+        ensureCareTeamThread: async () => fail(),
+        insertSystemCard: async () => fail(),
+        threadAllMemberUserIds: async () => fail(),
       };
       return fn(repo);
     },

@@ -129,6 +129,46 @@ export class FakeDb implements DbPort, ChatRepository {
   async threadMemberUserIds(threadId: string, exceptUserId: string): Promise<string[]> {
     return (this.threadMembers.get(threadId) ?? []).filter((u) => u !== exceptUserId);
   }
+
+  // ── System cards (WP 5.2) ────────────────────────────────────────────────
+  async ensureCareTeamThread(patientId: string, newThreadId: string): Promise<string> {
+    for (const t of this.threads.values()) {
+      if (t.patientId === patientId && t.threadType === 'patient_care_team') return t.id;
+    }
+    this.threads.set(newThreadId, {
+      id: newThreadId,
+      patientId,
+      threadType: 'patient_care_team',
+      createdAt: this.clock.now().toISOString(),
+    });
+    this.threadMembers.set(newThreadId, []);
+    return newThreadId;
+  }
+
+  async insertSystemCard(input: {
+    id: string;
+    threadId: string;
+    body: string;
+    linkedFollowUpRowId: string | null;
+  }): Promise<MessageRecord> {
+    const rec: MessageRecord = {
+      id: input.id,
+      threadId: input.threadId,
+      senderUserId: null,
+      senderRole: 'system',
+      body: input.body,
+      urgencyFlag: 'routine_query',
+      linkedFollowUpRowId: input.linkedFollowUpRowId,
+      isReleased: true,
+      createdAt: this.clock.now().toISOString(),
+    };
+    this.messages.push(rec);
+    return { ...rec };
+  }
+
+  async threadAllMemberUserIds(threadId: string): Promise<string[]> {
+    return [...(this.threadMembers.get(threadId) ?? [])];
+  }
 }
 
 /** Records pushes; a user is "connected" if added via connect(). */

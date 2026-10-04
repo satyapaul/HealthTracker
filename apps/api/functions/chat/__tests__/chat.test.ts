@@ -4,7 +4,13 @@
  * event), the read paths, and the transcript-immutability posture.
  */
 import { describe, it, expect } from 'vitest';
-import { sendMessage, listThreads, listMessages, type Principal } from '../services/chat-service';
+import {
+  sendMessage,
+  listThreads,
+  listMessages,
+  postSystemCard,
+  type Principal,
+} from '../services/chat-service';
 import { makeBundle } from './fakes';
 
 const patient = (pid: string): Principal => ({
@@ -187,6 +193,55 @@ describe('reads', () => {
     await expect(listMessages(b.deps, patient('p2'), threadId)).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
+  });
+});
+
+describe('postSystemCard (C-03, WP 5.2)', () => {
+  it('ensures the care-team thread, appends a system card, and delivers it', async () => {
+    const b = makeBundle();
+    // No thread seeded — postSystemCard should create the care-team thread.
+    const res = await postSystemCard(b.deps, {
+      patientId: 'p1',
+      text: 'Patient submitted labs for 2026-08-16 at Sanjay Gandhi Memorial Hospital',
+      linkedFollowUpRowId: 'fur-1',
+    });
+    expect(res.messageId).toBeTruthy();
+    expect(res.threadId).toBeTruthy();
+    // Card persisted as a system message (NULL sender).
+    const card = b.db.messages.find((m) => m.id === res.messageId)!;
+    expect(card.senderRole).toBe('system');
+    expect(card.senderUserId).toBeNull();
+    expect(card.isReleased).toBe(true);
+    expect(card.body).toContain('Sanjay Gandhi Memorial Hospital');
+    // ChatMessageReceived published.
+    expect(b.queue.events).toHaveLength(1);
+  });
+
+  it('reuses an existing care-team thread', async () => {
+    const b = makeBundle();
+    b.db.seedThread({
+      id: 'thr-existing',
+      patientId: 'p1',
+      threadType: 'patient_care_team',
+      memberUserIds: ['u-p1', 'd1'],
+    });
+    const res = await postSystemCard(b.deps, { patientId: 'p1', text: 'Dose updated' });
+    expect(res.threadId).toBe('thr-existing');
+  });
+
+  it('pushes the card to connected members', async () => {
+    const b = makeBundle();
+    b.db.seedThread({
+      id: 'thr-1',
+      patientId: 'p1',
+      threadType: 'patient_care_team',
+      memberUserIds: ['u-p1', 'd1'],
+    });
+    b.connections.connect('d1', 'conn-d1');
+    await postSystemCard(b.deps, { patientId: 'p1', text: 'Doctor updated pred dose to 5' });
+    expect(b.connections.pushes.map((p) => p.connectionId)).toEqual(['conn-d1']);
+    // The push frame carries ids only (the body is read under RLS).
+    expect(b.connections.pushes[0].payload).not.toHaveProperty('body');
   });
 });
 

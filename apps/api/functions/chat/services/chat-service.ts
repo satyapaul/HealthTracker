@@ -201,6 +201,80 @@ function assertCanPost(principal: Principal, _thread: ThreadRecord): void {
   // thread (already checked). consult_view restriction lands in Phase 6.
 }
 
+// ── System event cards (WP 5.2 — C-03) ──────────────────────────────────────
+
+export interface PostSystemCardCommand {
+  patientId: string;
+  /** The card copy (in-app content — clinical specifics allowed, unlike SMS). */
+  text: string;
+  linkedFollowUpRowId?: string;
+}
+
+export interface PostSystemCardResult {
+  messageId: string;
+  threadId: string;
+}
+
+/**
+ * Post an automated system card into a patient's care-team thread (C-03).
+ * Runs under a trusted system (admin) context: ensures the thread exists,
+ * appends an immutable system message (sender_role='system', sender_user_id
+ * NULL), then delivers it like a released message (push + ChatMessageReceived).
+ *
+ * Called by the followup/dose (and later care-team/transfers) domains via the
+ * SystemCardPoster port — never on a user's behalf, so it is not gated by the
+ * user insert policies (see V12 cm_system_insert).
+ */
+export async function postSystemCard(
+  deps: ChatDeps,
+  cmd: PostSystemCardCommand
+): Promise<PostSystemCardResult> {
+  const ctx: SessionContext = { userId: 'system', role: 'admin', patientId: null };
+
+  const { card, recipients, threadId } = await deps.db.transaction(async (repo) => {
+    await repo.setSessionContext(ctx);
+    const tid = await repo.ensureCareTeamThread(cmd.patientId, deps.ids.uuid());
+    const message = await repo.insertSystemCard({
+      id: deps.ids.uuid(),
+      threadId: tid,
+      body: cmd.text,
+      linkedFollowUpRowId: cmd.linkedFollowUpRowId ?? null,
+    });
+    const members = await repo.threadAllMemberUserIds(tid);
+    return { card: message, recipients: members, threadId: tid };
+  });
+
+  // Deliver to connected members; a system card is always released.
+  for (const userId of recipients) {
+    const connectionId = await deps.connections.connectionFor(userId);
+    if (connectionId) {
+      await deps.connections.push(connectionId, {
+        type: 'chat.message',
+        threadId,
+        messageId: card.id,
+        senderUserId: null,
+        urgencyFlag: card.urgencyFlag,
+        createdAt: card.createdAt,
+      });
+    }
+  }
+  await deps.queue.chatMessageReceived({
+    threadId,
+    messageId: card.id,
+    patientId: cmd.patientId,
+    urgencyFlag: card.urgencyFlag,
+    recipientUserIds: recipients,
+  });
+
+  deps.logger.info('chat.system_card.posted', {
+    threadId,
+    messageId: card.id,
+    patientId: cmd.patientId,
+  });
+
+  return { messageId: card.id, threadId };
+}
+
 // ── Reads ──────────────────────────────────────────────────────────────────
 
 /** List threads for a patient (RLS-scoped; patient sees only their care_team). */

@@ -8,6 +8,7 @@ import type { IdGenerator } from './ports/ids';
 import type { HospitalPort } from './ports/hospital';
 import type { S3Port, UploadIntentCache } from './ports/storage';
 import type { ReminderCanceller } from './ports/reminders';
+import type { SystemCardPoster } from './ports/system-card';
 import type { Logger } from './logger';
 
 /** Attachment-upload configuration (WP 2.4). */
@@ -26,6 +27,7 @@ export interface FollowupDeps {
   s3: S3Port;
   uploadIntents: UploadIntentCache;
   reminders: ReminderCanceller;
+  systemCards: SystemCardPoster;
   clock: Clock;
   ids: IdGenerator;
   logger: Logger;

@@ -126,8 +126,23 @@ export async function submitReview(
       sentAt: reviewedAt,
     });
 
-    return { response, doseChanges };
+    return { response, doseChanges, patientId: row.patientId };
   });
+
+  // Post the C-03 DoseChanged system card into the care-team chat thread.
+  // Resilient side effect: a card failure must not fail the review. Only post
+  // when doses actually changed.
+  if (result.doseChanges.length > 0) {
+    try {
+      await deps.systemCards.postDoseChanges({
+        patientId: result.patientId,
+        followUpRowId: rowId,
+        changes: result.doseChanges.map((d) => ({ fieldName: d.fieldName, newValue: d.newValue })),
+      });
+    } catch {
+      deps.logger.warn('dose.review.systemcard_failed', { rowId });
+    }
+  }
 
   deps.logger.info('dose.review.submitted', {
     rowId,

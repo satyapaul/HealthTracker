@@ -7,6 +7,7 @@
 import type { DoseDeps } from '../deps';
 import type { Clock } from '../ports/clock';
 import type { IdGenerator } from '../ports/ids';
+import type { SystemCardPoster } from '../ports/system-card';
 import type { Logger } from '../logger';
 import type {
   DbPort,
@@ -157,9 +158,26 @@ export class FakeDb implements DbPort, DoseRepository {
   }
 }
 
+/** Fake system-card poster — records DoseChanged cards (WP 5.2). */
+export class FakeSystemCardPoster implements SystemCardPoster {
+  public cards: {
+    patientId: string;
+    followUpRowId: string;
+    changes: { fieldName: string; newValue: string }[];
+  }[] = [];
+  async postDoseChanges(input: {
+    patientId: string;
+    followUpRowId: string;
+    changes: { fieldName: string; newValue: string }[];
+  }): Promise<void> {
+    this.cards.push(input);
+  }
+}
+
 export interface FakeBundle {
   deps: DoseDeps;
   db: FakeDb;
+  systemCards: FakeSystemCardPoster;
   ids: FakeIds;
   clock: FixedClock;
 }
@@ -168,6 +186,7 @@ export function makeBundle(now?: Date): FakeBundle {
   const clock = new FixedClock(now ?? new Date('2026-06-10T10:00:00.000Z'));
   const ids = new FakeIds();
   const db = new FakeDb();
-  const deps: DoseDeps = { db, clock, ids, logger: noopLogger };
-  return { deps, db, ids, clock };
+  const systemCards = new FakeSystemCardPoster();
+  const deps: DoseDeps = { db, systemCards, clock, ids, logger: noopLogger };
+  return { deps, db, systemCards, ids, clock };
 }

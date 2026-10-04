@@ -10,6 +10,7 @@ import type { IdGenerator } from '../ports/ids';
 import type { HospitalPort, HospitalRef } from '../ports/hospital';
 import type { S3Port, UploadIntentCache, UploadIntent, PresignedUpload } from '../ports/storage';
 import type { ReminderCanceller, ReminderCancellation } from '../ports/reminders';
+import type { SystemCardPoster } from '../ports/system-card';
 import type { FollowupConfig } from '../deps';
 import type { Logger } from '../logger';
 import type {
@@ -264,6 +265,33 @@ export class FakeReminderCanceller implements ReminderCanceller {
   }
 }
 
+/**
+ * Fake system-card poster (WP 5.2). Records each FollowUpSubmitted card so tests
+ * can assert the card is posted with the hospital name (DoD). Can be set to
+ * throw to exercise the resilient (card-failure-doesn't-fail-submit) path.
+ */
+export class FakeSystemCardPoster implements SystemCardPoster {
+  public cards: {
+    patientId: string;
+    followUpRowId: string;
+    ppDate: string;
+    engagementHospitalName: string;
+  }[] = [];
+  public failOnce = false;
+  async postFollowUpSubmitted(input: {
+    patientId: string;
+    followUpRowId: string;
+    ppDate: string;
+    engagementHospitalName: string;
+  }): Promise<void> {
+    if (this.failOnce) {
+      this.failOnce = false;
+      throw new Error('card post failed');
+    }
+    this.cards.push(input);
+  }
+}
+
 export interface FakeBundle {
   deps: FollowupDeps;
   db: FakeDb;
@@ -271,6 +299,7 @@ export interface FakeBundle {
   s3: FakeS3;
   uploadIntents: FakeUploadIntentCache;
   reminders: FakeReminderCanceller;
+  systemCards: FakeSystemCardPoster;
   ids: FakeIds;
   clock: FixedClock;
 }
@@ -283,16 +312,18 @@ export function makeBundle(now?: Date): FakeBundle {
   const s3 = new FakeS3();
   const uploadIntents = new FakeUploadIntentCache();
   const reminders = new FakeReminderCanceller();
+  const systemCards = new FakeSystemCardPoster();
   const deps: FollowupDeps = {
     db,
     hospital,
     s3,
     uploadIntents,
     reminders,
+    systemCards,
     clock,
     ids,
     logger: noopLogger,
     config: { ...defaultConfig },
   };
-  return { deps, db, hospital, s3, uploadIntents, reminders, ids, clock };
+  return { deps, db, hospital, s3, uploadIntents, reminders, systemCards, ids, clock };
 }

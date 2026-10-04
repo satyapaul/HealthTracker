@@ -88,6 +88,30 @@ describe('PUT /followup/rows/{id}/response (doctor review)', () => {
     const row = b.db.rows.get(ROW)!;
     expect(row.patientReportedDoses).toEqual({ neoral_tac: '2/2', pred: '5' });
     expect(row.doctorPrescribedDoses).toEqual({ neoral_tac: '3/2', pred: '5', aza_mpa: '1/1' });
+    // WP 5.2: a DoseChanged system card is posted with the changed fields.
+    expect(b.systemCards.cards).toHaveLength(1);
+    const card = b.systemCards.cards[0];
+    expect(card.patientId).toBe('p1');
+    expect(card.changes.map((c) => c.fieldName).sort()).toEqual(['aza_mpa', 'neoral_tac']);
+  });
+
+  it('does NOT post a system card when no doses changed', async () => {
+    const b = makeBundle();
+    seedPendingRow(b);
+    await route(
+      b.deps,
+      req({
+        method: 'PUT',
+        path: `/followup/rows/${ROW}/response`,
+        principal: doctor('d1'),
+        // Prescribe exactly the patient-reported doses -> zero changes.
+        body: JSON.stringify({
+          doctorPrescribedDoses: { neoral_tac: '2/2', pred: '5' },
+          additionalTests: [],
+        }),
+      })
+    );
+    expect(b.systemCards.cards).toHaveLength(0);
   });
 
   it('DENIES a doctor not assigned to the patient (404, no leak)', async () => {

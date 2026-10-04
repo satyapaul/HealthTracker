@@ -357,6 +357,42 @@ describe('PUT /followup/rows/{id}/submit', () => {
     expect(parse(res.body).data).toMatchObject({ status: 'pending' });
     expect(b.reminders.calls).toHaveLength(1);
   });
+
+  // WP 5.2 — submit posts a C-03 system card including the hospital name (DoD).
+  it('posts a FollowUpSubmitted system card with the hospital name on submit', async () => {
+    const b = makeBundle();
+    await route(
+      b.deps,
+      req({ method: 'POST', path: '/followup/rows', principal: patient('p1'), body: fullRowBody() })
+    );
+    const res = await route(
+      b.deps,
+      req({ method: 'PUT', path: '/followup/rows/row-uuid-1/submit', principal: patient('p1') })
+    );
+    expect(res.statusCode).toBe(200);
+    expect(b.systemCards.cards).toHaveLength(1);
+    const card = b.systemCards.cards[0];
+    expect(card.patientId).toBe('p1');
+    expect(card.followUpRowId).toBe('row-uuid-1');
+    expect(card.ppDate).toBe('2026-06-01');
+    // DoD: the card carries the engagement hospital name.
+    expect(card.engagementHospitalName).toBe('Test Hospital');
+  });
+
+  it('submit still succeeds if the system-card post fails (resilient side effect)', async () => {
+    const b = makeBundle();
+    b.systemCards.failOnce = true;
+    await route(
+      b.deps,
+      req({ method: 'POST', path: '/followup/rows', principal: patient('p1'), body: fullRowBody() })
+    );
+    const res = await route(
+      b.deps,
+      req({ method: 'PUT', path: '/followup/rows/row-uuid-1/submit', principal: patient('p1') })
+    );
+    expect(res.statusCode).toBe(200);
+    expect(parse(res.body).data).toMatchObject({ status: 'pending' });
+  });
 });
 
 describe('GET /followup/rows (read + list) — RLS', () => {
