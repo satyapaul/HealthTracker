@@ -1,15 +1,24 @@
 /**
- * Runtime configuration. The API base URL is injected from VITE_API_BASE_URL
- * so the SAME build can target the local smoke harness
- * (http://localhost:4000) or a real deployment
- * (https://<api-id>.execute-api.ap-south-1.amazonaws.com) without code changes.
+ * Runtime configuration. The API base URL is injected from VITE_API_BASE_URL:
+ *   - unset / empty  -> SAME-ORIGIN (relative URLs). This is the default and
+ *     is what the single-process demo deploy uses (the harness serves both the
+ *     SPA and the API from one origin), and what a real deployment behind the
+ *     same domain would use.
+ *   - a full URL     -> target that host (e.g. the local harness on :4000 via
+ *     apps/web/.env.local, or a real API Gateway URL).
  */
 export interface RuntimeConfig {
+  /** '' means same-origin (relative requests). */
   apiBaseUrl: string;
 }
 
-const DEFAULT_API_BASE_URL = 'http://localhost:4000';
-
 export const runtimeConfig: RuntimeConfig = {
-  apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/+$/, ''),
+  apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, ''),
 };
+
+/**
+ * Demo mode (VITE_DEMO_MODE=true at build): the app runs against the seeded
+ * in-memory harness with no real backend, so the welcome screen surfaces the
+ * well-known demo phone numbers + OTP code. Off for any real build.
+ */
+export const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';

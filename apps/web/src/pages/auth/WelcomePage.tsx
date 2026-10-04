@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, TextField, ShieldCheckIcon } from '../../ui';
 import { branding } from '../../config/branding';
+import { demoMode } from '../../config/runtime';
 import { authApi, type OAuthProvider } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
 import { getSession } from '../../api/session';
@@ -136,6 +137,26 @@ export function WelcomePage() {
         >
           {submitting ? 'Sending…' : 'Send OTP'}
         </Button>
+
+        {demoMode && (
+          <div
+            style={{
+              marginTop: '16px',
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--color-surface-accent)',
+              color: 'var(--color-primary)',
+              fontSize: '13px',
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Demo sign-in</strong> — no real SMS is sent. Use:
+            <br />
+            Patient: <strong>9999900001</strong> · Doctor: <strong>9999900002</strong>
+            <br />
+            OTP code: <strong>424242</strong>
+          </div>
+        )}
 
         <p
           style={{

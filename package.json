@@ -20,6 +20,9 @@
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "synth": "npm run synth --workspace infra",
+    "demo:build": "npm run build --workspace @postopcare/api && VITE_API_BASE_URL= VITE_DEMO_MODE=true npm run build --workspace @postopcare/web",
+    "demo:serve": "WEB_DIST=apps/web/dist PORT=${PORT:-8080} node apps/api/dist/harness/server.js",
+    "demo": "npm run demo:build && npm run demo:serve",
     "prepare": "husky || true"
   },
   "devDependencies": {

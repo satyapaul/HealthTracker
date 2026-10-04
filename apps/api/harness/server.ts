@@ -20,6 +20,8 @@
  *   node apps/api/dist/harness/server.js            (PORT env, default 4000)
  */
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // Real handler entry adapters (handlerWithDeps) + their test fakes.
 import { handlerWithDeps as patientHandler } from '../functions/patient';
@@ -129,6 +131,67 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json; charset=utf-8',
+};
+
+/**
+ * Serve the built SPA from WEB_DIST (single-process demo deploy). Non-API
+ * requests resolve to a file under the dist dir; unknown non-asset paths fall
+ * back to index.html so the client router can handle them. Returns false when
+ * no WEB_DIST is configured (dev mode: Vite serves the SPA separately).
+ */
+function serveStatic(webDist: string | null, pathname: string, res: http.ServerResponse): boolean {
+  if (!webDist) return false;
+
+  // Resolve + contain within the dist dir (no path traversal).
+  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const resolved = path.resolve(webDist, rel);
+  if (!resolved.startsWith(path.resolve(webDist))) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return true;
+  }
+
+  let filePath = resolved;
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    // SPA fallback: anything that isn't a real file is handled by the client
+    // router, so serve index.html. (A missing hashed asset still 404s below.)
+    const looksLikeAsset = path.extname(rel) !== '';
+    if (looksLikeAsset) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('Not found');
+      return true;
+    }
+    filePath = path.join(webDist, 'index.html');
+    if (!fs.existsSync(filePath)) return false;
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const body = fs.readFileSync(filePath);
+  res.writeHead(200, {
+    'content-type': MIME[ext] ?? 'application/octet-stream',
+    // index.html must not be cached (hashed assets can be).
+    'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+  });
+  res.end(body);
+  return true;
+}
+
 /** Build the per-domain handlers over seeded fake bundles. */
 function buildRoutes(fx: Fixture, authFx: AuthFixture): { match: (p: string) => LambdaFn | null } {
   const patient = patientHandler(fx.patient.deps) as unknown as LambdaFn;
@@ -177,6 +240,10 @@ export function startServer(port: number): http.Server {
   const authFx = makeAuthFixture();
   const routes = buildRoutes(fx, authFx);
 
+  // When WEB_DIST is set (demo deploy), the harness also serves the built SPA
+  // from the same origin. Unset in local dev (Vite serves the SPA on :5173).
+  const webDist = process.env.WEB_DIST ? path.resolve(process.env.WEB_DIST) : null;
+
   // Permissive CORS for local dev only: the Vite SPA (localhost:5173) calls
   // this harness (localhost:4000) cross-origin. NOT for any real deployment.
   const CORS_HEADERS: Record<string, string> = {
@@ -199,6 +266,10 @@ export function startServer(port: number): http.Server {
         const body = await readBody(req);
         const handler = routes.match(url.pathname);
         if (!handler) {
+          // Not an API route: try serving the built SPA (single-process demo).
+          if (req.method === 'GET' && serveStatic(webDist, url.pathname, res)) {
+            return;
+          }
           res.writeHead(404, { 'content-type': 'application/json', ...CORS_HEADERS });
           res.end(
             JSON.stringify({
@@ -232,6 +303,9 @@ export function startServer(port: number): http.Server {
   });
   server.listen(port, () => {
     console.log(`[harness] listening on http://localhost:${port}`);
+    if (webDist) {
+      console.log(`[harness] serving SPA from ${webDist}`);
+    }
     console.log(
       `[harness] dev OTP login: phone ${AUTH_PHONES.patient} (patient) or ${AUTH_PHONES.doctor} (doctor), code ${DEV_OTP}`
     );

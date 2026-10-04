@@ -51,17 +51,21 @@ export interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
-  const url = new URL(
-    path.startsWith('http') ? path : `${runtimeConfig.apiBaseUrl}${path}`,
-    // base is only used when path is relative in non-browser contexts
-    runtimeConfig.apiBaseUrl || 'http://localhost'
-  );
+  const base = runtimeConfig.apiBaseUrl;
+  // Resolve against the configured base, or the current page origin when the
+  // base is empty (same-origin deploy). A non-browser context (tests) falls
+  // back to a dummy origin; only the path + query matter there.
+  const origin =
+    base || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+  const absolute = path.startsWith('http') ? path : `${base}${path}`;
+  const url = new URL(absolute, origin);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v !== undefined) url.searchParams.set(k, String(v));
     }
   }
-  return url.toString();
+  // Same-origin: return a relative URL so it works on any host/port.
+  return base ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
