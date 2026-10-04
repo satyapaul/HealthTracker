@@ -43,13 +43,17 @@ export class FixedClock implements Clock {
 
 export const noopLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
-/** A hospital port that accepts a fixed allowlist of hospital ids. */
+/**
+ * A simple allowlist HospitalPort for followup/attachment tests that only need
+ * "this hospital id is valid for the engagement". The real Virtual-or-
+ * affiliation RULE (DbHospitalPort) is exercised in hospital.test.ts.
+ */
 export class FakeHospital implements HospitalPort {
   constructor(private known: Map<string, string> = new Map([['hosp-1', 'Test Hospital']])) {}
   add(id: string, name: string): void {
     this.known.set(id, name);
   }
-  async resolveForEngagement(id: string): Promise<HospitalRef | null> {
+  async resolveForEngagement(_patientId: string, id: string): Promise<HospitalRef | null> {
     const name = this.known.get(id);
     return name ? { id, name } : null;
   }

@@ -88,7 +88,7 @@ export async function createDraft(
       field: 'engagementHospitalId',
     });
   }
-  const hospital = await deps.hospital.resolveForEngagement(cmd.engagementHospitalId);
+  const hospital = await deps.hospital.resolveForEngagement(patientId, cmd.engagementHospitalId);
   if (!hospital) {
     throw new AppError('VALIDATION_ERROR', 'Selected hospital is not valid for this engagement', {
       field: 'engagementHospitalId',
@@ -149,7 +149,7 @@ export async function updateDraft(
   id: string,
   cmd: UpdateDraftCommand
 ): Promise<FollowupRowView> {
-  const { ctx } = patientSessionContext(principal);
+  const { ctx, patientId } = patientSessionContext(principal);
 
   const update: FollowupRowUpdateInput = {};
   if (cmd.ppDate !== undefined) update.ppDate = assertPpDate(cmd.ppDate);
@@ -162,7 +162,7 @@ export async function updateDraft(
 
   // A hospital change re-resolves the snapshot.
   if (cmd.engagementHospitalId !== undefined) {
-    const hospital = await deps.hospital.resolveForEngagement(cmd.engagementHospitalId);
+    const hospital = await deps.hospital.resolveForEngagement(patientId, cmd.engagementHospitalId);
     if (!hospital) {
       throw new AppError('VALIDATION_ERROR', 'Selected hospital is not valid for this engagement', {
         field: 'engagementHospitalId',

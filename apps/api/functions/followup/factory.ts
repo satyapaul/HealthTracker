@@ -10,7 +10,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FollowupConfig, FollowupDeps } from './deps';
 import type { AttachmentRepository, DbPort, FollowupRepository } from './ports/db';
-import type { HospitalPort } from './ports/hospital';
+import type { HospitalLookup } from './ports/hospital';
+import { DbHospitalPort } from './ports/hospital';
 import type { S3Port, UploadIntentCache } from './ports/storage';
 import { consoleLogger } from './logger';
 
@@ -38,10 +39,25 @@ function notWiredDb(): DbPort {
   };
 }
 
-function notWiredHospital(): HospitalPort {
+/**
+ * HospitalLookup backed by the DB (WP 3.1). The concrete queries live in a thin
+ * adapter wired alongside the DB adapter in the infra step; until then this is
+ * a not-wired stub. The engagement-authorization RULE (Virtual-or-affiliation)
+ * is in DbHospitalPort and is fully unit-tested with a fake lookup.
+ */
+function notWiredHospitalLookup(): HospitalLookup {
+  const fail = (): never => {
+    throw new Error('hospital lookup adapter is not wired yet');
+  };
   return {
-    async resolveForEngagement() {
-      throw new Error('hospital lookup is not wired yet (Phase 3)');
+    async getHospital() {
+      return fail();
+    },
+    async getPrimaryDoctorId() {
+      return fail();
+    },
+    async hasActiveAffiliation() {
+      return fail();
     },
   };
 }
@@ -80,7 +96,7 @@ const DEFAULT_CONFIG: FollowupConfig = {
 export function buildDeps(_env: NodeJS.ProcessEnv = process.env): FollowupDeps {
   return {
     db: notWiredDb(),
-    hospital: notWiredHospital(),
+    hospital: new DbHospitalPort(notWiredHospitalLookup()),
     s3: notWiredS3(),
     uploadIntents: notWiredUploadIntents(),
     clock: { now: () => new Date() },
