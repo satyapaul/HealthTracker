@@ -7,6 +7,7 @@ import type { Clock } from './ports/clock';
 import type { IdGenerator } from './ports/ids';
 import type { HospitalPort } from './ports/hospital';
 import type { S3Port, UploadIntentCache } from './ports/storage';
+import type { ReminderCanceller } from './ports/reminders';
 import type { Logger } from './logger';
 
 /** Attachment-upload configuration (WP 2.4). */
@@ -24,6 +25,7 @@ export interface FollowupDeps {
   hospital: HospitalPort;
   s3: S3Port;
   uploadIntents: UploadIntentCache;
+  reminders: ReminderCanceller;
   clock: Clock;
   ids: IdGenerator;
   logger: Logger;

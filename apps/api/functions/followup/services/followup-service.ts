@@ -228,11 +228,18 @@ export async function submitRow(
     throw new AppError('NOT_FOUND', 'Follow-up row not found');
   }
 
+  // Cancel pending reminders for the patient's scheduled follow-up milestone and
+  // link it to this row (spec §7.6 / LLD §4.3): a patient who submits early is
+  // not reminded. No-ops safely when there is no scheduled follow-up milestone.
+  const cancellation = await deps.reminders.cancelPendingForFollowup(row.patientId, row.id);
+
   deps.logger.info('followup.row.submitted', {
     rowId: row.id,
     patientId: row.patientId,
     userId: principal.userId,
     status: row.status,
+    linkedMilestoneId: cancellation.milestoneId,
+    remindersCancelled: cancellation.cancelledCount,
   });
 
   return row;

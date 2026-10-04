@@ -323,6 +323,40 @@ describe('PUT /followup/rows/{id}/submit', () => {
     );
     expect(res.statusCode).toBe(409);
   });
+
+  // WP 4.2 — submit cancels pending reminders (DoD).
+  it('cancels pending reminders for the patient on submit', async () => {
+    const b = makeBundle();
+    b.reminders.result = { milestoneId: 'ms-1', cancelledCount: 3 };
+    await route(
+      b.deps,
+      req({ method: 'POST', path: '/followup/rows', principal: patient('p1'), body: fullRowBody() })
+    );
+    const res = await route(
+      b.deps,
+      req({ method: 'PUT', path: '/followup/rows/row-uuid-1/submit', principal: patient('p1') })
+    );
+    expect(res.statusCode).toBe(200);
+    // The canceller was invoked for this patient + the submitted row.
+    expect(b.reminders.calls).toHaveLength(1);
+    expect(b.reminders.calls[0]).toEqual({ patientId: 'p1', followUpRowId: 'row-uuid-1' });
+  });
+
+  it('submit still succeeds when there is no scheduled milestone (no-op cancel)', async () => {
+    const b = makeBundle();
+    // default FakeReminderCanceller result = { milestoneId: null, cancelledCount: 0 }
+    await route(
+      b.deps,
+      req({ method: 'POST', path: '/followup/rows', principal: patient('p1'), body: fullRowBody() })
+    );
+    const res = await route(
+      b.deps,
+      req({ method: 'PUT', path: '/followup/rows/row-uuid-1/submit', principal: patient('p1') })
+    );
+    expect(res.statusCode).toBe(200);
+    expect(parse(res.body).data).toMatchObject({ status: 'pending' });
+    expect(b.reminders.calls).toHaveLength(1);
+  });
 });
 
 describe('GET /followup/rows (read + list) — RLS', () => {

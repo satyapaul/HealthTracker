@@ -9,6 +9,7 @@ import type { Clock } from '../ports/clock';
 import type { IdGenerator } from '../ports/ids';
 import type { HospitalPort, HospitalRef } from '../ports/hospital';
 import type { S3Port, UploadIntentCache, UploadIntent, PresignedUpload } from '../ports/storage';
+import type { ReminderCanceller, ReminderCancellation } from '../ports/reminders';
 import type { FollowupConfig } from '../deps';
 import type { Logger } from '../logger';
 import type {
@@ -247,12 +248,29 @@ export const defaultConfig: FollowupConfig = {
   uploadIntentTtlSeconds: 1800,
 };
 
+/**
+ * Fake reminder canceller (WP 4.2). Records each submit-cancellation call and
+ * returns a configurable result so tests can assert cancel-on-submit.
+ */
+export class FakeReminderCanceller implements ReminderCanceller {
+  public calls: { patientId: string; followUpRowId: string }[] = [];
+  public result: ReminderCancellation = { milestoneId: null, cancelledCount: 0 };
+  async cancelPendingForFollowup(
+    patientId: string,
+    followUpRowId: string
+  ): Promise<ReminderCancellation> {
+    this.calls.push({ patientId, followUpRowId });
+    return this.result;
+  }
+}
+
 export interface FakeBundle {
   deps: FollowupDeps;
   db: FakeDb;
   hospital: FakeHospital;
   s3: FakeS3;
   uploadIntents: FakeUploadIntentCache;
+  reminders: FakeReminderCanceller;
   ids: FakeIds;
   clock: FixedClock;
 }
@@ -264,15 +282,17 @@ export function makeBundle(now?: Date): FakeBundle {
   const hospital = new FakeHospital();
   const s3 = new FakeS3();
   const uploadIntents = new FakeUploadIntentCache();
+  const reminders = new FakeReminderCanceller();
   const deps: FollowupDeps = {
     db,
     hospital,
     s3,
     uploadIntents,
+    reminders,
     clock,
     ids,
     logger: noopLogger,
     config: { ...defaultConfig },
   };
-  return { deps, db, hospital, s3, uploadIntents, ids, clock };
+  return { deps, db, hospital, s3, uploadIntents, reminders, ids, clock };
 }

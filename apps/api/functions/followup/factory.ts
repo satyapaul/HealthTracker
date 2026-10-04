@@ -13,6 +13,7 @@ import type { AttachmentRepository, DbPort, FollowupRepository } from './ports/d
 import type { HospitalLookup } from './ports/hospital';
 import { DbHospitalPort } from './ports/hospital';
 import type { S3Port, UploadIntentCache } from './ports/storage';
+import type { ReminderCanceller } from './ports/reminders';
 import { consoleLogger } from './logger';
 
 function notWiredDb(): DbPort {
@@ -87,6 +88,19 @@ function notWiredUploadIntents(): UploadIntentCache {
   };
 }
 
+/**
+ * Reminder canceller: the real adapter (DB UPDATEs under the patient RLS
+ * context) is wired in the infra step. Until then it safely no-ops so a submit
+ * still succeeds — the cancellation is a side effect, not a gate.
+ */
+function noopReminderCanceller(): ReminderCanceller {
+  return {
+    async cancelPendingForFollowup() {
+      return { milestoneId: null, cancelledCount: 0 };
+    },
+  };
+}
+
 const DEFAULT_CONFIG: FollowupConfig = {
   allowedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png'],
   maxUploadBytes: 20 * 1024 * 1024, // 20MB (LLD §4.3)
@@ -98,6 +112,7 @@ export function buildDeps(_env: NodeJS.ProcessEnv = process.env): FollowupDeps {
     db: notWiredDb(),
     hospital: new DbHospitalPort(notWiredHospitalLookup()),
     s3: notWiredS3(),
+    reminders: noopReminderCanceller(),
     uploadIntents: notWiredUploadIntents(),
     clock: { now: () => new Date() },
     ids: { uuid: () => randomUUID() },
