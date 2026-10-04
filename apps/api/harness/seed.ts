@@ -26,7 +26,6 @@ import type { makeBundle as chatBundle } from '../functions/chat/__tests__/fakes
 // CommonJS harness — so the harness assembles the auth deps itself below).
 import {
   FakeDb as AuthFakeDb,
-  FakeRedis as AuthFakeRedis,
   FakeAudit as AuthFakeAudit,
   FakeIds as AuthFakeIds,
   FixedClock as AuthFixedClock,
@@ -37,11 +36,12 @@ import {
 import type { AuthDeps } from '../functions/auth/deps';
 import type { GoogleOAuthPort, XOAuthPort } from '../functions/auth/ports/oauth';
 import type { SmsGateway } from '../functions/auth/ports/sms';
+import type { RedisPort } from '../functions/auth/ports/redis';
 
 export interface AuthFixture {
   deps: AuthDeps;
   db: AuthFakeDb;
-  redis: AuthFakeRedis;
+  redis: RedisPort;
   ids: AuthFakeIds;
 }
 
@@ -263,6 +263,52 @@ export const AUTH_PHONES = {
   doctor: '+919999900002',
 } as const;
 
+/**
+ * TTL-aware in-memory Redis for the harness. Unlike the unit-test FakeRedis
+ * (whose `expire` is a no-op), this honors key expiry using real wall-clock
+ * time, so OTP send rate limits (otp_rate:{phone}, 3/hour) and OTP challenge
+ * TTLs reset the way production ElastiCache does — otherwise the dev OTP login
+ * gets permanently rate-limited for the life of the harness process.
+ */
+class TtlRedis implements RedisPort {
+  private store = new Map<string, { value: string; expiresAtMs: number | null }>();
+
+  private live(key: string): string | null {
+    const e = this.store.get(key);
+    if (!e) return null;
+    if (e.expiresAtMs !== null && Date.now() > e.expiresAtMs) {
+      this.store.delete(key);
+      return null;
+    }
+    return e.value;
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.live(key);
+  }
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    this.store.set(key, {
+      value,
+      expiresAtMs: ttlSeconds ? Date.now() + ttlSeconds * 1000 : null,
+    });
+  }
+  async del(key: string): Promise<number> {
+    return this.store.delete(key) ? 1 : 0;
+  }
+  async incr(key: string): Promise<number> {
+    const current = this.live(key);
+    const n = Number(current ?? '0') + 1;
+    // Preserve any existing expiry when incrementing.
+    const existing = this.store.get(key);
+    this.store.set(key, { value: String(n), expiresAtMs: existing?.expiresAtMs ?? null });
+    return n;
+  }
+  async expire(key: string, ttlSeconds: number): Promise<void> {
+    const e = this.store.get(key);
+    if (e) e.expiresAtMs = Date.now() + ttlSeconds * 1000;
+  }
+}
+
 /** Plain (non-spy) OAuth/SMS port stubs — the harness doesn't exercise the
  *  OAuth round-trip, and SMS "send" just no-ops (the dev OTP is fixed). */
 function stubGoogle(): GoogleOAuthPort {
@@ -296,7 +342,7 @@ function stubSms(): SmsGateway {
  */
 export function makeAuthFixture(): AuthFixture {
   const db = new AuthFakeDb();
-  const redis = new AuthFakeRedis();
+  const redis = new TtlRedis();
   const audit = new AuthFakeAudit();
   const ids = new AuthFakeIds();
   const clock = new AuthFixedClock(new Date());
@@ -311,7 +357,10 @@ export function makeAuthFixture(): AuthFixture {
     clock,
     ids,
     logger: authNoopLogger,
-    config: { ...authDefaultConfig },
+    // Dev-only: relax the OTP send rate limit so manual browser testing is not
+    // blocked (prod keeps the real 3/hour via authDefaultConfig). High ceiling
+    // + short window; the real limiter logic is still exercised.
+    config: { ...authDefaultConfig, otpSendMaxPerHour: 50, otpSendWindowSeconds: 60 },
   };
   const auth: AuthFixture = { deps, db, redis, ids };
 
