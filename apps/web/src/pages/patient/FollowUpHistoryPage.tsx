@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, GlobeIcon, HospitalIcon, PlusIcon } from '../../ui';
+import { Button, Card, GlobeIcon, HospitalIcon, PlusIcon } from '../../ui';
 import { patientApi } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
 import type { FollowUpRow } from '../../api/types';
@@ -52,9 +52,24 @@ export function FollowUpHistoryPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
-      <header>
-        <h1 style={{ fontSize: '28px', fontWeight: 700 }}>Follow-Up History</h1>
-        <p style={{ color: 'var(--color-text-muted)' }}>Your dated post-op submissions</p>
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: '16px',
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: '28px', fontWeight: 700 }}>Follow-Up History</h1>
+          <p style={{ color: 'var(--color-text-muted)' }}>Your dated post-op submissions</p>
+        </div>
+        {/* Desktop: a header action instead of a floating FAB over empty space. */}
+        <span className="desktop-only">
+          <Button leading={<PlusIcon size={18} />} onClick={() => navigate('/app/submit')}>
+            New Follow-Up
+          </Button>
+        </span>
       </header>
 
       {/* Filter chips */}
@@ -85,7 +100,7 @@ export function FollowUpHistoryPage() {
 
       {!rows && !error && <p style={{ color: 'var(--color-text-muted)' }}>Loading…</p>}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div className="grid-cols-desktop-2" style={{ gap: '12px' }}>
         {visible.map((r) => (
           <RowCard
             key={r.id}
@@ -95,9 +110,10 @@ export function FollowUpHistoryPage() {
         ))}
       </div>
 
-      {/* New Follow-Up FAB */}
+      {/* New Follow-Up FAB — mobile only (desktop has the header action). */}
       <button
         type="button"
+        className="mobile-only"
         onClick={() => navigate('/app/submit')}
         style={{
           position: 'fixed',

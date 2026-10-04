@@ -53,6 +53,7 @@ export function OtpVerifyPanel({
 
   return (
     <div
+      className="auth-screen"
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -61,6 +62,7 @@ export function OtpVerifyPanel({
       }}
     >
       <div
+        className="auth-card"
         style={{
           width: '100%',
           maxWidth: '480px',

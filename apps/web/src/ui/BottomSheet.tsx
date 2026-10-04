@@ -37,6 +37,7 @@ export function BottomSheet({ open, title, onClose, children, footer }: BottomSh
 
   return (
     <div
+      className="bottom-sheet-overlay"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -55,6 +56,7 @@ export function BottomSheet({ open, title, onClose, children, footer }: BottomSh
         aria-label={title}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        className="bottom-sheet-panel"
         style={{
           width: '100%',
           maxWidth: '480px',

@@ -12,6 +12,7 @@ export function SplashPage() {
   const navigate = useNavigate();
   return (
     <div
+      className="auth-screen"
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -20,6 +21,7 @@ export function SplashPage() {
       }}
     >
       <div
+        className="auth-card"
         style={{
           width: '100%',
           maxWidth: '480px',

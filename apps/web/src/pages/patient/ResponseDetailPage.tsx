@@ -60,7 +60,7 @@ export function ResponseDetailPage() {
         background: 'var(--color-bg)',
       }}
     >
-      <div style={{ width: '100%', maxWidth: '480px', display: 'flex', flexDirection: 'column' }}>
+      <div className="flow-wrap">
         <header
           style={{
             background: 'var(--color-surface)',

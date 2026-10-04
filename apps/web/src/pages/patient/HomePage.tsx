@@ -51,63 +51,67 @@ export function HomePage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <GreetingHeader />
 
-      {/* Next follow-up due */}
-      <Card accent padding={5}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <p
-              style={{
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                color: 'var(--color-text-muted)',
-                fontSize: '13px',
-                fontWeight: 700,
-              }}
-            >
-              Next Follow-up Due
-            </p>
-            <p style={{ fontSize: '26px', fontWeight: 700, marginTop: '6px' }}>
-              {nextFollowUpLabel(latest)}
-            </p>
+      <div className="grid-cols-desktop-2">
+        {/* Next follow-up due */}
+        <Card accent padding={5}>
+          <div
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+          >
+            <div>
+              <p
+                style={{
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  color: 'var(--color-text-muted)',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                }}
+              >
+                Next Follow-up Due
+              </p>
+              <p style={{ fontSize: '26px', fontWeight: 700, marginTop: '6px' }}>
+                {nextFollowUpLabel(latest)}
+              </p>
+            </div>
+            <Pill tone="primary">Upcoming</Pill>
           </div>
-          <Pill tone="primary">Upcoming</Pill>
-        </div>
-        <Button
-          size="lg"
-          block
-          leading={<PlusIcon size={20} />}
-          style={{ marginTop: '18px' }}
-          onClick={() => navigate('/app/submit')}
-        >
-          Submit Now
-        </Button>
-      </Card>
+          <Button
+            size="lg"
+            block
+            leading={<PlusIcon size={20} />}
+            style={{ marginTop: '18px' }}
+            onClick={() => navigate('/app/submit')}
+          >
+            Submit Now
+          </Button>
+        </Card>
 
-      {/* Last lab stats */}
-      <section>
-        <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '12px' }}>
-          Your Last Lab Stats
-        </h2>
-        {loading ? (
-          <SkeletonStats />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-            {stats.map((s) => (
-              <Card key={s.label} padding={4}>
-                <p style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>{s.label}</p>
-                <p style={{ marginTop: '8px', fontSize: '22px', fontWeight: 700 }}>
-                  <span style={{ color: 'var(--color-primary)' }}>{s.value}</span>{' '}
-                  {s.unit && (
-                    <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                      {s.unit}
-                    </span>
-                  )}
-                </p>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+        {/* Last lab stats */}
+        <section>
+          <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '12px' }}>
+            Your Last Lab Stats
+          </h2>
+          {loading ? (
+            <SkeletonStats />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+              {stats.map((s) => (
+                <Card key={s.label} padding={4}>
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>{s.label}</p>
+                  <p style={{ marginTop: '8px', fontSize: '22px', fontWeight: 700 }}>
+                    <span style={{ color: 'var(--color-primary)' }}>{s.value}</span>{' '}
+                    {s.unit && (
+                      <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                        {s.unit}
+                      </span>
+                    )}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
 
       {/* Recent updates */}
       <section>
@@ -140,7 +144,7 @@ export function HomePage() {
             <p style={{ color: 'var(--color-text-muted)' }}>{error}</p>
           </Card>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="grid-cols-desktop-2" style={{ gap: '12px' }}>
             <UpdatesList rows={rows ?? []} loading={loading} />
           </div>
         )}

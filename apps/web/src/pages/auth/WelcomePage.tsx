@@ -61,6 +61,7 @@ export function WelcomePage() {
 
   return (
     <div
+      className="auth-screen"
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -69,6 +70,7 @@ export function WelcomePage() {
       }}
     >
       <div
+        className="auth-card"
         style={{
           width: '100%',
           maxWidth: '480px',
