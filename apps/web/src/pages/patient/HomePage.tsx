@@ -77,7 +77,7 @@ export function HomePage() {
           block
           leading={<PlusIcon size={20} />}
           style={{ marginTop: '18px' }}
-          onClick={() => navigate('/app/chart')}
+          onClick={() => navigate('/app/submit')}
         >
           Submit Now
         </Button>

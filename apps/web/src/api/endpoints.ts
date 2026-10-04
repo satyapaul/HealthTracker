@@ -36,6 +36,25 @@ export const patientApi = {
   listRows: () => api.get<{ rows: FollowUpRow[] }>('/followup/rows'),
 };
 
+/** Request body for creating a draft follow-up row (POST /followup/rows). */
+export interface CreateFollowUpBody {
+  ppDate: string;
+  /** Required (v1.7): every row is tied to a hospital engagement. */
+  engagementHospitalId: string;
+  labValues: Record<string, number | string>;
+  drugLevels: Record<string, number>;
+  patientReportedDoses: Record<string, string>;
+  weightKg?: number;
+  notes?: string;
+}
+
+export const followupApi = {
+  /** Create a draft row (status 'draft'). */
+  createDraft: (body: CreateFollowUpBody) => api.post<FollowUpRow>('/followup/rows', body),
+  /** Submit a draft for doctor review (status -> 'pending'). */
+  submit: (rowId: string) => api.put<FollowUpRow>(`/followup/rows/${rowId}/submit`),
+};
+
 // ── Hospitals (WP 3.1 / 3.3) ────────────────────────────────────────────────
 export const hospitalApi = {
   /** Patient picker: the primary doctor's active affiliations + Virtual (pinned). */

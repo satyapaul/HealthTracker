@@ -3,6 +3,7 @@ import { PatientShell } from './ui';
 import { RequireAuth } from './auth/RequireAuth';
 import { WelcomePage } from './pages/auth/WelcomePage';
 import { HomePage } from './pages/patient/HomePage';
+import { SubmitFollowUpPage } from './pages/patient/SubmitFollowUpPage';
 import { Placeholder } from './pages/Placeholder';
 
 /**
@@ -20,7 +21,17 @@ export function App() {
       <Route path="/" element={<Navigate to="/app/home" replace />} />
       <Route path="/welcome" element={<WelcomePage />} />
 
-      {/* Patient portal */}
+      {/* Patient full-screen follow-up wizard (outside the tab shell) */}
+      <Route
+        path="/app/submit"
+        element={
+          <RequireAuth roles={['patient', 'caregiver']}>
+            <SubmitFollowUpPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Patient portal (tab shell) */}
       <Route
         path="/app/*"
         element={
