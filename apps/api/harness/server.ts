@@ -34,8 +34,16 @@ import { handlerWithDeps as adminHandler } from '../functions/admin';
 import { makeBundle as adminBundle } from '../functions/admin/__tests__/fakes';
 import { handlerWithDeps as chatHandler } from '../functions/chat';
 import { makeBundle as chatBundle } from '../functions/chat/__tests__/fakes';
+import { handlerWithDeps as authHandler } from '../functions/auth';
 
-import { seedAll, type Fixture } from './seed';
+import {
+  seedAll,
+  makeAuthFixture,
+  AUTH_PHONES,
+  DEV_OTP,
+  type AuthFixture,
+  type Fixture,
+} from './seed';
 
 interface LambdaResult {
   statusCode: number;
@@ -54,25 +62,54 @@ interface ApiEvent {
   requestContext: { authorizer: { lambda: Record<string, string> } };
 }
 
-/** Parse the dev auth token into an authorizer context, if present. */
-function devPrincipal(headers: http.IncomingHttpHeaders): Record<string, string> {
+/** Extract the raw bearer token from the Authorization header, or null. */
+function bearerToken(headers: http.IncomingHttpHeaders): string | null {
   const raw = headers['authorization'];
-  if (typeof raw !== 'string') return {};
-  const m = /^Bearer\s+dev:([^:]*):([^:]*):(.*)$/.exec(raw.trim());
-  if (!m) return {};
-  return { userId: m[1], role: m[2], patientId: m[3] ?? '' };
+  if (typeof raw !== 'string') return null;
+  const m = /^Bearer\s+(.+)$/i.exec(raw.trim());
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Resolve the request principal for the WP 1.2 authorizer context. Two paths:
+ *   1. A dev token `dev:<userId>:<role>:<patientId>` is parsed directly (the
+ *      original smoke-test shim — lets a script act as any principal).
+ *   2. Any other bearer token is treated as a REAL opaque session token issued
+ *      by the auth handler and resolved against the SAME auth-fake Redis the
+ *      authorizer would read (`session:{token}` -> { userId, role, patientId }).
+ *      This is what makes a real OTP login authorize subsequent requests.
+ * Returns {} (unauthenticated) when neither resolves.
+ */
+async function resolvePrincipal(
+  headers: http.IncomingHttpHeaders,
+  authFx: AuthFixture
+): Promise<Record<string, string>> {
+  const token = bearerToken(headers);
+  if (!token) return {};
+
+  const dev = /^dev:([^:]*):([^:]*):(.*)$/.exec(token);
+  if (dev) {
+    return { userId: dev[1], role: dev[2], patientId: dev[3] ?? '' };
+  }
+
+  // Real session token -> look up the shared auth-fake Redis session store.
+  const raw = await authFx.redis.get(`session:${token}`);
+  if (!raw) return {};
+  const payload = JSON.parse(raw) as { userId: string; role: string; patientId: string | null };
+  return { userId: payload.userId, role: payload.role, patientId: payload.patientId ?? '' };
 }
 
 /** API Gateway path params are resolved by the proxy; here the domain routers
  *  re-parse the path themselves, so we only need to pass the raw path. The
  *  patient/followup/etc. routers read pathParameters only for the proxy `{id}`
  *  style — but our domains parse from `path`, so an empty map is fine. */
-function toEvent(
+async function toEvent(
   req: http.IncomingMessage,
   pathname: string,
   query: URLSearchParams,
-  body: string
-): ApiEvent {
+  body: string,
+  authFx: AuthFixture
+): Promise<ApiEvent> {
   const q: Record<string, string> = {};
   query.forEach((v, k) => (q[k] = v));
   return {
@@ -82,7 +119,7 @@ function toEvent(
     body: body.length > 0 ? body : null,
     pathParameters: {},
     queryStringParameters: q,
-    requestContext: { authorizer: { lambda: devPrincipal(req.headers) } },
+    requestContext: { authorizer: { lambda: await resolvePrincipal(req.headers, authFx) } },
   };
 }
 
@@ -93,16 +130,18 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 /** Build the per-domain handlers over seeded fake bundles. */
-function buildRoutes(fx: Fixture): { match: (p: string) => LambdaFn | null } {
+function buildRoutes(fx: Fixture, authFx: AuthFixture): { match: (p: string) => LambdaFn | null } {
   const patient = patientHandler(fx.patient.deps) as unknown as LambdaFn;
   const followup = followupHandler(fx.followup.deps) as unknown as LambdaFn;
   const dose = doseHandler(fx.dose.deps) as unknown as LambdaFn;
   const hospital = hospitalHandler(fx.hospital.deps) as unknown as LambdaFn;
   const admin = adminHandler(fx.admin.deps) as unknown as LambdaFn;
   const chat = chatHandler(fx.chat.deps) as unknown as LambdaFn;
+  const auth = authHandler(authFx.deps) as unknown as LambdaFn;
 
   return {
     match(pathname: string): LambdaFn | null {
+      if (pathname.startsWith('/auth/')) return auth;
       if (pathname.startsWith('/admin/')) return admin;
       if (pathname === '/patients' || pathname.startsWith('/patients/')) return patient;
       if (pathname.startsWith('/followup/'))
@@ -135,16 +174,32 @@ export function startServer(port: number): http.Server {
     admin: adminBundle(),
     chat: chatBundle(),
   });
-  const routes = buildRoutes(fx);
+  const authFx = makeAuthFixture();
+  const routes = buildRoutes(fx, authFx);
+
+  // Permissive CORS for local dev only: the Vite SPA (localhost:5173) calls
+  // this harness (localhost:4000) cross-origin. NOT for any real deployment.
+  const CORS_HEADERS: Record<string, string> = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization,Content-Type',
+    'Access-Control-Max-Age': '86400',
+  };
 
   const server = http.createServer((req, res) => {
     void (async () => {
       try {
+        // Answer CORS preflight without hitting a handler.
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, CORS_HEADERS);
+          res.end();
+          return;
+        }
         const url = new URL(req.url ?? '/', `http://localhost:${port}`);
         const body = await readBody(req);
         const handler = routes.match(url.pathname);
         if (!handler) {
-          res.writeHead(404, { 'content-type': 'application/json' });
+          res.writeHead(404, { 'content-type': 'application/json', ...CORS_HEADERS });
           res.end(
             JSON.stringify({
               success: false,
@@ -154,11 +209,17 @@ export function startServer(port: number): http.Server {
           );
           return;
         }
-        const result = await handler(toEvent(req, url.pathname, url.searchParams, body));
-        res.writeHead(result.statusCode, result.headers ?? { 'content-type': 'application/json' });
+        const result = await handler(
+          await toEvent(req, url.pathname, url.searchParams, body, authFx)
+        );
+        res.writeHead(result.statusCode, {
+          'content-type': 'application/json',
+          ...result.headers,
+          ...CORS_HEADERS,
+        });
         res.end(result.body);
       } catch (err) {
-        res.writeHead(500, { 'content-type': 'application/json' });
+        res.writeHead(500, { 'content-type': 'application/json', ...CORS_HEADERS });
         res.end(
           JSON.stringify({
             success: false,
@@ -171,6 +232,9 @@ export function startServer(port: number): http.Server {
   });
   server.listen(port, () => {
     console.log(`[harness] listening on http://localhost:${port}`);
+    console.log(
+      `[harness] dev OTP login: phone ${AUTH_PHONES.patient} (patient) or ${AUTH_PHONES.doctor} (doctor), code ${DEV_OTP}`
+    );
   });
   return server;
 }

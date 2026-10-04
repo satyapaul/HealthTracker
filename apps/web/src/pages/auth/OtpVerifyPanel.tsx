@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, TextField } from '../../ui';
 import { authApi } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
-import { setSession } from '../../api/session';
+import { setSession, clearSession } from '../../api/session';
 
 export interface OtpVerifyPanelProps {
   challengeId: string;
@@ -33,9 +33,18 @@ export function OtpVerifyPanel({
     setSubmitting(true);
     try {
       const result = await authApi.verifyOtp(challengeId, digits);
-      setSession({ token: result.token, role: result.role, patientId: result.patientId });
+      // Store the opaque token first so the follow-up /auth/me call is
+      // authenticated, then resolve role + linked patient from the profile.
+      setSession({ token: result.sessionToken, role: result.user.role });
+      const me = await authApi.me();
+      setSession({
+        token: result.sessionToken,
+        role: me.role,
+        patientId: me.linkedPatientId ?? undefined,
+      });
       onVerified();
     } catch (err) {
+      clearSession();
       setError(err instanceof ApiError ? err.message : 'Verification failed. Try again.');
     } finally {
       setSubmitting(false);

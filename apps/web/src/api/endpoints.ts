@@ -11,26 +11,44 @@ import type {
   PatientChart,
 } from './types';
 
-// ── Auth (SPEC §12 / WP 1.1) ────────────────────────────────────────────────
-export interface OtpRequestResult {
+// ── Auth (SPEC §12 / WP 1.1) — contract: apps/api/functions/auth ────────────
+export type UserRoleName = 'patient' | 'caregiver' | 'doctor' | 'admin';
+
+/** POST /auth/otp/send response. */
+export interface OtpSendResult {
   challengeId: string;
-  /** Seconds until the code expires. */
-  expiresInSec: number;
+  expiresAt: string;
+  resendAfterSeconds: number;
 }
 
-export interface SessionResult {
-  token: string;
-  role: 'patient' | 'caregiver' | 'doctor' | 'admin';
-  patientId?: string;
+/** POST /auth/otp/verify response. */
+export interface OtpVerifyResult {
+  sessionToken: string;
+  expiresAt: string;
+  user: { id: string; role: UserRoleName; displayName: string };
+}
+
+/** GET /auth/me response. */
+export interface MeResult {
+  id: string;
+  role: UserRoleName;
+  displayName: string;
+  email: string | null;
+  status: string;
+  linkedPatientId: string | null;
 }
 
 export const authApi = {
-  /** Start an SMS OTP sign-in; returns a challenge to verify. */
+  /** Start an SMS OTP sign-in (phone must be E.164). */
   requestOtp: (phoneE164: string) =>
-    api.post<OtpRequestResult>('/auth/otp/request', { phone: phoneE164 }, { auth: false }),
-  /** Verify an OTP code and establish a session. */
-  verifyOtp: (challengeId: string, code: string) =>
-    api.post<SessionResult>('/auth/otp/verify', { challengeId, code }, { auth: false }),
+    api.post<OtpSendResult>('/auth/otp/send', { phone_number: phoneE164 }, { auth: false }),
+  /** Verify an OTP code; returns the opaque session token + minimal user. */
+  verifyOtp: (challengeId: string, otp: string) =>
+    api.post<OtpVerifyResult>('/auth/otp/verify', { challengeId, otp }, { auth: false }),
+  /** Resolve the signed-in user (role + linked patient) for the stored token. */
+  me: () => api.get<MeResult>('/auth/me'),
+  /** Revoke the current session server-side. */
+  signOut: () => api.del<null>('/auth/session'),
 };
 
 /** OAuth providers shown on the welcome screen (redirect-based). */

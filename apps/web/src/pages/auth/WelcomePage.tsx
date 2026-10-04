@@ -4,6 +4,8 @@ import { Button, TextField, ShieldCheckIcon } from '../../ui';
 import { branding } from '../../config/branding';
 import { authApi, type OAuthProvider } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
+import { getSession } from '../../api/session';
+import { homePathForRole } from '../../auth/RequireAuth';
 import { OtpVerifyPanel } from './OtpVerifyPanel';
 
 /**
@@ -48,7 +50,11 @@ export function WelcomePage() {
         challengeId={challengeId}
         phoneHint={`+91 ${phone}`}
         onBack={() => setChallengeId(null)}
-        onVerified={() => navigate('/app/home', { replace: true })}
+        onVerified={() => {
+          // Route to the signed-in user's portal based on the resolved role.
+          const session = getSession();
+          navigate(session ? homePathForRole(session.role) : '/app/home', { replace: true });
+        }}
       />
     );
   }
