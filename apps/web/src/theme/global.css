@@ -1,0 +1,85 @@
+/* Global baseline + tokens fallback. The :root values here are defaults;
+   applyTheme() overrides them at runtime from the token object so a future
+   per-brand/per-hospital theme swap needs no CSS edits. */
+:root {
+  --color-bg: #f5f4ef;
+  --color-surface: #ffffff;
+  --color-surface-accent: #e4ede4;
+  --color-primary: #2f4f3e;
+  --color-primary-hover: #263f32;
+  --color-on-primary: #ffffff;
+  --color-text: #14181a;
+  --color-text-muted: #5f6b63;
+  --color-border: #e2e3dd;
+  --color-status-high-bg: #fce4e4;
+  --color-status-high-text: #b4231f;
+  --color-status-warn-bg: #fbf1d4;
+  --color-status-warn-text: #8a6a16;
+  --color-status-normal-bg: #d9efdd;
+  --color-status-normal-text: #1f6b36;
+  --color-danger: #b4231f;
+  --color-danger-surface: #fcebea;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --shadow-card: 0 1px 2px rgba(20, 24, 26, 0.04);
+  --shadow-sheet: 0 -8px 30px rgba(20, 24, 26, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+/* Visible focus for keyboard users (accessibility). */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
