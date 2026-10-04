@@ -8,6 +8,7 @@ import type { Clock } from '../ports/clock';
 import type { IdGenerator } from '../ports/ids';
 import type { Logger } from '../logger';
 import type {
+  DashboardPatientRecord,
   DbPort,
   NewPatientInput,
   PatientRecord,
@@ -52,7 +53,24 @@ export class FakeDb implements DbPort, PatientRepository {
   public contexts: SessionContext[] = [];
   private ctx: SessionContext | null = null;
 
+  // WP 3.4 dashboard support: doctor assignments + follow-up engagements.
+  /** `${doctorId}:${patientId}` entries (doctor_patient_assignments). */
+  public assignments = new Set<string>();
+  /** Follow-up engagements: patientId -> list of { hospitalId, pending }. */
+  public engagements = new Map<string, { hospitalId: string; pending: boolean }[]>();
+
   constructor(private clock: Clock) {}
+
+  /** Test helper: assign a doctor to a patient. */
+  assign(doctorId: string, patientId: string): void {
+    this.assignments.add(`${doctorId}:${patientId}`);
+  }
+
+  /** Test helper: add a follow-up engagement for a patient at a hospital. */
+  addEngagement(patientId: string, hospitalId: string, pending: boolean): void {
+    if (!this.engagements.has(patientId)) this.engagements.set(patientId, []);
+    this.engagements.get(patientId)!.push({ hospitalId, pending });
+  }
 
   async transaction<T>(fn: (repo: PatientRepository) => Promise<T>): Promise<T> {
     // Context is set per-transaction by the caller via setSessionContext.
@@ -131,6 +149,31 @@ export class FakeDb implements DbPort, PatientRepository {
 
   async listPatients(): Promise<PatientRecord[]> {
     return [...this.rows.values()].filter((r) => this.canSee(r)).map((r) => ({ ...r }));
+  }
+
+  /**
+   * Doctor dashboard (WP 3.4): the current doctor's assigned patients, each
+   * with a pending-submission count; when hospitalId is set, only patients with
+   * at least one engagement at that hospital.
+   */
+  async listDoctorDashboard(hospitalId: string | null): Promise<DashboardPatientRecord[]> {
+    const ctx = this.ctx;
+    if (!ctx || ctx.role !== 'doctor') return [];
+    const out: DashboardPatientRecord[] = [];
+    for (const row of this.rows.values()) {
+      if (!this.assignments.has(`${ctx.userId}:${row.id}`)) continue;
+      const engagements = this.engagements.get(row.id) ?? [];
+      if (hospitalId !== null && !engagements.some((e) => e.hospitalId === hospitalId)) {
+        continue; // no engagement at the filtered hospital
+      }
+      const pendingSubmissionCount = engagements.filter((e) => e.pending).length;
+      out.push({
+        patient: { ...row },
+        pendingSubmissionCount,
+        hasPending: pendingSubmissionCount > 0,
+      });
+    }
+    return out;
   }
 }
 

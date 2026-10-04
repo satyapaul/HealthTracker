@@ -124,6 +124,24 @@ export interface PatientRepository {
 
   /** List charts visible to the current principal (RLS-scoped). */
   listPatients(): Promise<PatientRecord[]>;
+
+  /**
+   * Doctor dashboard listing (WP 3.4 — spec D-13). Returns the doctor's
+   * assigned patients (RLS-scoped) with a pending-submission count. When
+   * `hospitalId` is provided, only patients with at least one follow_up_row
+   * engagement at that hospital are returned.
+   */
+  listDoctorDashboard(hospitalId: string | null): Promise<DashboardPatientRecord[]>;
+}
+
+/**
+ * A doctor-dashboard patient summary: the chart plus the count of follow-up
+ * rows awaiting review (status='pending'). `hasPending` is the badge flag.
+ */
+export interface DashboardPatientRecord {
+  patient: PatientRecord;
+  pendingSubmissionCount: number;
+  hasPending: boolean;
 }
 
 /** DB port entrypoint: run work inside a single transaction. */

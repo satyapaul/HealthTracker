@@ -216,6 +216,47 @@ export async function listPatients(
   return records;
 }
 
+/** A doctor-dashboard entry: the chart plus pending-submission badge info. */
+export interface DashboardEntry {
+  patient: PatientView;
+  pendingSubmissionCount: number;
+  hasPending: boolean;
+}
+
+/**
+ * Doctor dashboard (WP 3.4 — spec D-13): the doctor's assigned patients with
+ * pending-submission badges, optionally filtered to patients with at least one
+ * follow-up engagement at `hospitalId`. Doctor-only; RLS scopes to assigned
+ * patients (V6 doctor-select policy).
+ */
+export async function listDoctorDashboard(
+  deps: PatientDeps,
+  principal: Principal,
+  hospitalId: string | null
+): Promise<DashboardEntry[]> {
+  if (principal.role !== 'doctor') {
+    throw new AppError('FORBIDDEN', 'The hospital-filtered dashboard is for doctors');
+  }
+
+  const ctx = sessionContextFor(principal);
+  const rows = await deps.db.transaction(async (repo) => {
+    await repo.setSessionContext(ctx);
+    return repo.listDoctorDashboard(hospitalId);
+  });
+
+  deps.logger.info('patient.dashboard.list', {
+    userId: principal.userId,
+    hospitalFiltered: hospitalId !== null,
+    count: rows.length,
+  });
+
+  return rows.map((r) => ({
+    patient: r.patient,
+    pendingSubmissionCount: r.pendingSubmissionCount,
+    hasPending: r.hasPending,
+  }));
+}
+
 /** Mutable fields accepted on update (handler pre-validates types). */
 export interface UpdatePatientCommand {
   name?: string;

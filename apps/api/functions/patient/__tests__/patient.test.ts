@@ -12,7 +12,7 @@ import { makeBundle } from './fakes';
 function req(
   partial: Partial<PatientRequest> & Pick<PatientRequest, 'method' | 'path'>
 ): PatientRequest {
-  return { headers: {}, body: null, principal: null, pathParams: {}, ...partial };
+  return { headers: {}, body: null, principal: null, pathParams: {}, query: {}, ...partial };
 }
 
 function parse(body: string): {

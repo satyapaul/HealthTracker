@@ -24,6 +24,7 @@ export interface ApiGatewayEvent {
   headers?: Record<string, string | undefined> | null;
   body?: string | null;
   pathParameters?: Record<string, string | undefined> | null;
+  queryStringParameters?: Record<string, string | undefined> | null;
   requestContext?: {
     http?: { method?: string; path?: string };
     authorizer?: {
@@ -73,6 +74,7 @@ function toPatientRequest(event: ApiGatewayEvent): PatientRequest {
     body: event.body ?? null,
     principal: extractPrincipal(event),
     pathParams: event.pathParameters ?? {},
+    query: event.queryStringParameters ?? {},
   };
 }
 

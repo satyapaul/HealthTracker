@@ -26,6 +26,7 @@ function notWiredDb(): DbPort {
         existsByMaxId: async () => fail(),
         updatePatient: async () => fail(),
         listPatients: async () => fail(),
+        listDoctorDashboard: async () => fail(),
       };
       return fn(repo);
     },

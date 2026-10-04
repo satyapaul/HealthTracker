@@ -28,6 +28,8 @@ export interface PatientRequest {
   principal: Principal | null;
   /** Path parameters (e.g. { id } for /patients/{id}). */
   pathParams: Record<string, string | undefined>;
+  /** Query-string parameters (e.g. { hospital_id } for the dashboard filter). */
+  query: Record<string, string | undefined>;
 }
 
 const VALID_ROLES: readonly UserRole[] = ['patient', 'caregiver', 'doctor', 'admin'];
