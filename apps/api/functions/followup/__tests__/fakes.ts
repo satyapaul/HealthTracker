@@ -8,12 +8,17 @@ import type { FollowupDeps } from '../deps';
 import type { Clock } from '../ports/clock';
 import type { IdGenerator } from '../ports/ids';
 import type { HospitalPort, HospitalRef } from '../ports/hospital';
+import type { S3Port, UploadIntentCache, UploadIntent, PresignedUpload } from '../ports/storage';
+import type { FollowupConfig } from '../deps';
 import type { Logger } from '../logger';
 import type {
+  AttachmentRecord,
+  AttachmentRepository,
   DbPort,
   FollowupRepository,
   FollowupRowRecord,
   FollowupRowUpdateInput,
+  NewAttachmentInput,
   NewFollowupRowInput,
   SessionContext,
 } from '../ports/db';
@@ -58,14 +63,17 @@ export class FakeHospital implements HospitalPort {
  *   - admin: all rows visible.
  *   - doctor: no rows (policy deferred to Phase 6).
  */
-export class FakeDb implements DbPort, FollowupRepository {
+export class FakeDb implements DbPort, FollowupRepository, AttachmentRepository {
   public rows = new Map<string, FollowupRowRecord>();
+  public attachments: AttachmentRecord[] = [];
   public contexts: SessionContext[] = [];
   private ctx: SessionContext | null = null;
 
   constructor(private clock: Clock) {}
 
-  async transaction<T>(fn: (repo: FollowupRepository) => Promise<T>): Promise<T> {
+  async transaction<T>(
+    fn: (repo: FollowupRepository & AttachmentRepository) => Promise<T>
+  ): Promise<T> {
     return fn(this);
   }
 
@@ -160,12 +168,87 @@ export class FakeDb implements DbPort, FollowupRepository {
       .sort((a, b) => (a.ppDate < b.ppDate ? 1 : -1))
       .map((r) => ({ ...r }));
   }
+
+  // ── AttachmentRepository (WP 2.4) ──────────────────────────────────────────
+  async insertAttachment(input: NewAttachmentInput): Promise<AttachmentRecord> {
+    const rec: AttachmentRecord = {
+      id: input.id,
+      followUpRowId: input.followUpRowId,
+      objectKey: input.objectKey,
+      originalFilename: input.originalFilename,
+      mimeType: input.mimeType,
+      fileSizeBytes: input.fileSizeBytes,
+      scanStatus: 'pending',
+      uploadedBy: input.uploadedBy,
+      createdAt: this.clock.now().toISOString(),
+    };
+    this.attachments.push(rec);
+    return { ...rec };
+  }
+
+  async listAttachments(followUpRowId: string): Promise<AttachmentRecord[]> {
+    // The row-visibility check happens in the service via findRowById; here we
+    // just return this row's attachments newest-first.
+    return this.attachments
+      .filter((a) => a.followUpRowId === followUpRowId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((a) => ({ ...a }));
+  }
 }
+
+/** Fake S3 port: records presign calls and tracks which objects "exist". */
+export class FakeS3 implements S3Port {
+  public existing = new Set<string>();
+  public presigned: { objectKey: string; contentType: string; maxBytes: number }[] = [];
+
+  async presignPut(
+    objectKey: string,
+    contentType: string,
+    maxBytes: number
+  ): Promise<PresignedUpload> {
+    this.presigned.push({ objectKey, contentType, maxBytes });
+    return {
+      uploadUrl: `https://s3.test/${objectKey}?sig=fake`,
+      expiresAt: '2026-01-01T00:15:00.000Z',
+    };
+  }
+
+  /** Simulate the client having completed the PUT. */
+  markUploaded(objectKey: string): void {
+    this.existing.add(objectKey);
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    return this.existing.has(objectKey);
+  }
+}
+
+/** Fake upload-intent cache (in-memory, no TTL enforcement). */
+export class FakeUploadIntentCache implements UploadIntentCache {
+  public store = new Map<string, UploadIntent>();
+  async put(objectKey: string, intent: UploadIntent): Promise<void> {
+    this.store.set(objectKey, intent);
+  }
+  async get(objectKey: string): Promise<UploadIntent | null> {
+    return this.store.get(objectKey) ?? null;
+  }
+  async del(objectKey: string): Promise<void> {
+    this.store.delete(objectKey);
+  }
+}
+
+export const defaultConfig: FollowupConfig = {
+  allowedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png'],
+  maxUploadBytes: 20 * 1024 * 1024,
+  uploadIntentTtlSeconds: 1800,
+};
 
 export interface FakeBundle {
   deps: FollowupDeps;
   db: FakeDb;
   hospital: FakeHospital;
+  s3: FakeS3;
+  uploadIntents: FakeUploadIntentCache;
   ids: FakeIds;
   clock: FixedClock;
 }
@@ -175,6 +258,17 @@ export function makeBundle(now?: Date): FakeBundle {
   const ids = new FakeIds();
   const db = new FakeDb(clock);
   const hospital = new FakeHospital();
-  const deps: FollowupDeps = { db, hospital, clock, ids, logger: noopLogger };
-  return { deps, db, hospital, ids, clock };
+  const s3 = new FakeS3();
+  const uploadIntents = new FakeUploadIntentCache();
+  const deps: FollowupDeps = {
+    db,
+    hospital,
+    s3,
+    uploadIntents,
+    clock,
+    ids,
+    logger: noopLogger,
+    config: { ...defaultConfig },
+  };
+  return { deps, db, hospital, s3, uploadIntents, ids, clock };
 }

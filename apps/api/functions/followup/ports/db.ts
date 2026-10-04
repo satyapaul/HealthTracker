@@ -71,7 +71,8 @@ export interface FollowupRowUpdateInput {
 
 /**
  * Transaction-scoped repository. All methods run under the RLS context set via
- * `setSessionContext` and use parameterized queries.
+ * `setSessionContext` and use parameterized queries. Attachment methods
+ * (WP 2.4) are mixed in via AttachmentRepository below.
  */
 export interface FollowupRepository {
   setSessionContext(ctx: SessionContext): Promise<void>;
@@ -98,7 +99,45 @@ export interface FollowupRepository {
   listRowsForPatient(patientId: string): Promise<FollowupRowRecord[]>;
 }
 
+/** Scan state of an uploaded attachment (mirrors the V7 scan_status enum). */
+export type ScanStatus = 'pending' | 'clean' | 'quarantined';
+
+/** A lab-report attachment record (LLD §1.13). */
+export interface AttachmentRecord {
+  id: string;
+  followUpRowId: string;
+  objectKey: string;
+  originalFilename: string;
+  mimeType: string;
+  fileSizeBytes: number | null;
+  scanStatus: ScanStatus;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+/** Fields accepted when registering an attachment at confirm time. */
+export interface NewAttachmentInput {
+  id: string;
+  followUpRowId: string;
+  objectKey: string;
+  originalFilename: string;
+  mimeType: string;
+  fileSizeBytes: number | null;
+  uploadedBy: string;
+}
+
+/**
+ * Attachment repository methods (WP 2.4), mixed into the transaction-scoped
+ * repository. Row visibility is checked via FollowupRepository.findRowById.
+ */
+export interface AttachmentRepository {
+  /** Insert an attachment (scan_status defaults to 'pending'). */
+  insertAttachment(input: NewAttachmentInput): Promise<AttachmentRecord>;
+  /** List attachments for a row (RLS-scoped), newest first. */
+  listAttachments(followUpRowId: string): Promise<AttachmentRecord[]>;
+}
+
 /** DB port entrypoint: run work inside a single transaction. */
 export interface DbPort {
-  transaction<T>(fn: (repo: FollowupRepository) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (repo: FollowupRepository & AttachmentRepository) => Promise<T>): Promise<T>;
 }

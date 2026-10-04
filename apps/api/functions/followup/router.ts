@@ -12,6 +12,9 @@ import { handleUpdateRow } from './handlers/update-row';
 import { handleSubmitRow } from './handlers/submit-row';
 import { handleGetRow } from './handlers/get-row';
 import { handleListRows } from './handlers/list-rows';
+import { handlePresignAttachment } from './handlers/presign-attachment';
+import { handleConfirmAttachment } from './handlers/confirm-attachment';
+import { handleListAttachments } from './handlers/list-attachments';
 
 type RouteHandler = (deps: FollowupDeps, req: FollowupRequest) => Promise<HttpResponse>;
 
@@ -40,6 +43,30 @@ function resolve(
   if (submitMatch) {
     const id = decodeURIComponent(submitMatch[1]);
     if (m === 'PUT' || m === 'POST') return { handler: handleSubmitRow, pathParams: { id } };
+    return null;
+  }
+
+  // /followup/rows/{id}/attachments/presign
+  const presignMatch = /^\/followup\/rows\/([^/]+)\/attachments\/presign$/.exec(p);
+  if (presignMatch) {
+    const id = decodeURIComponent(presignMatch[1]);
+    if (m === 'POST') return { handler: handlePresignAttachment, pathParams: { id } };
+    return null;
+  }
+
+  // /followup/rows/{id}/attachments/confirm
+  const confirmMatch = /^\/followup\/rows\/([^/]+)\/attachments\/confirm$/.exec(p);
+  if (confirmMatch) {
+    const id = decodeURIComponent(confirmMatch[1]);
+    if (m === 'POST') return { handler: handleConfirmAttachment, pathParams: { id } };
+    return null;
+  }
+
+  // /followup/rows/{id}/attachments
+  const attachmentsMatch = /^\/followup\/rows\/([^/]+)\/attachments$/.exec(p);
+  if (attachmentsMatch) {
+    const id = decodeURIComponent(attachmentsMatch[1]);
+    if (m === 'GET') return { handler: handleListAttachments, pathParams: { id } };
     return null;
   }
 
