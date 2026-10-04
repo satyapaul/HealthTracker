@@ -40,12 +40,18 @@ function notWiredDb(): ScannerDbPort {
     async setAttachmentScanStatus() {
       throw new Error('scanner DB adapter is not wired yet');
     },
+    async setChatAttachmentScanStatus() {
+      throw new Error('scanner DB adapter is not wired yet');
+    },
   };
 }
 
 function notWiredNotifier(): NotifierPort {
   return {
     async attachmentQuarantined() {
+      throw new Error('notifier is not wired yet');
+    },
+    async chatMessageReleased() {
       throw new Error('notifier is not wired yet');
     },
   };

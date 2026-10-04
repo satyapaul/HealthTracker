@@ -45,11 +45,26 @@ export interface S3ScanPort {
  * takes no session/RLS context.
  */
 export interface ScannerDbPort {
-  /** Flip the attachments row for this object_key to clean | quarantined. */
+  /** Flip the lab-report attachments row for this object_key (WP 2.4). */
   setAttachmentScanStatus(objectKey: string, status: 'clean' | 'quarantined'): Promise<void>;
+
+  /**
+   * Flip the chat_attachments row for this object_key (WP 5.1). On 'clean',
+   * also release the held message (chat_messages.is_released = TRUE) and return
+   * the released message id + thread id so the scanner can publish
+   * ChatMessageReceived. On 'quarantined', leave the message unreleased and
+   * return null (it is never delivered).
+   */
+  setChatAttachmentScanStatus(
+    objectKey: string,
+    status: 'clean' | 'quarantined'
+  ): Promise<{ messageId: string; threadId: string } | null>;
 }
 
-/** Emits the ATTACHMENT_QUARANTINED event (notification-dispatcher SQS). */
+/** Emits notification events (notification-dispatcher SQS). */
 export interface NotifierPort {
+  /** ATTACHMENT_QUARANTINED — notify admin (no PHI). */
   attachmentQuarantined(objectKey: string): Promise<void>;
+  /** ChatMessageReceived — a held chat message released after a clean scan. */
+  chatMessageReleased(input: { messageId: string; threadId: string }): Promise<void>;
 }

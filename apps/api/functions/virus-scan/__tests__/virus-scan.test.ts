@@ -49,15 +49,30 @@ class FakeS3Scan implements S3ScanPort {
 
 class FakeScannerDb implements ScannerDbPort {
   public updates: { objectKey: string; status: string }[] = [];
+  public chatUpdates: { objectKey: string; status: string }[] = [];
+  /** objectKey -> the held message released on a clean chat-media scan. */
+  public releaseMap = new Map<string, { messageId: string; threadId: string }>();
   async setAttachmentScanStatus(objectKey: string, status: 'clean' | 'quarantined'): Promise<void> {
     this.updates.push({ objectKey, status });
+  }
+  async setChatAttachmentScanStatus(
+    objectKey: string,
+    status: 'clean' | 'quarantined'
+  ): Promise<{ messageId: string; threadId: string } | null> {
+    this.chatUpdates.push({ objectKey, status });
+    if (status === 'clean') return this.releaseMap.get(objectKey) ?? null;
+    return null; // quarantined -> message stays unreleased
   }
 }
 
 class FakeNotifier implements NotifierPort {
   public quarantined: string[] = [];
+  public released: { messageId: string; threadId: string }[] = [];
   async attachmentQuarantined(objectKey: string): Promise<void> {
     this.quarantined.push(objectKey);
+  }
+  async chatMessageReleased(input: { messageId: string; threadId: string }): Promise<void> {
+    this.released.push(input);
   }
 }
 
@@ -133,11 +148,29 @@ describe('virus-scan orchestration', () => {
     expect(notifier.quarantined).toHaveLength(0);
   });
 
-  it('skips chat-media events (Phase 5) without touching the attachments table', async () => {
-    const { deps, db } = makeDeps({ infected: ['chat/t1/x.jpg'] });
-    const [disposition] = await handlerWithDeps(deps)(s3Event(CHAT_BUCKET, 'chat/t1/x.jpg'));
-    expect(disposition).toBe('skipped');
+  it('a clean chat-media attachment is marked clean AND releases its held message', async () => {
+    const key = 'chat/t1/clean.jpg';
+    const { deps, db, notifier } = makeDeps();
+    db.releaseMap.set(key, { messageId: 'm1', threadId: 't1' });
+    const [disposition] = await handlerWithDeps(deps)(s3Event(CHAT_BUCKET, key));
+    expect(disposition).toBe('clean');
+    expect(db.chatUpdates).toEqual([{ objectKey: key, status: 'clean' }]);
+    // The lab-report path was NOT touched.
     expect(db.updates).toHaveLength(0);
+    // The held message was released (ChatMessageReceived published).
+    expect(notifier.released).toEqual([{ messageId: 'm1', threadId: 't1' }]);
+  });
+
+  it('a quarantined chat-media attachment leaves its message unreleased (DoD)', async () => {
+    const key = 'chat/t1/eicar.jpg';
+    const { deps, db, s3, notifier } = makeDeps({ infected: [key] });
+    const [disposition] = await handlerWithDeps(deps)(s3Event(CHAT_BUCKET, key));
+    expect(disposition).toBe('quarantined');
+    expect(db.chatUpdates).toEqual([{ objectKey: key, status: 'quarantined' }]);
+    expect(s3.deleted).toEqual([key]); // original removed
+    expect(notifier.quarantined).toEqual([key]); // admin notified
+    // No release event — the message is never delivered.
+    expect(notifier.released).toHaveLength(0);
   });
 
   it('skips events from an unknown bucket', async () => {

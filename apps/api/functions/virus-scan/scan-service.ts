@@ -45,31 +45,33 @@ export async function processObject(
     deps.logger.warn('virusscan.unknown_bucket', { bucket, objectKey });
     return 'skipped';
   }
-  if (kind === 'chat-media') {
-    // Phase 5: chat_attachments + held-message release. Not handled in WP 2.4.
-    deps.logger.info('virusscan.chat_media_deferred', { bucket, objectKey });
-    return 'skipped';
-  }
 
   const started = Date.now();
   const result = await deps.scanner.scan(bucket, objectKey);
 
   if (result.outcome === 'error') {
     // Leave pending so a later retry re-scans; emit a structured log for metrics.
-    deps.logger.error('virusscan.error', {
-      bucket,
-      objectKey,
-      durationMs: Date.now() - started,
-    });
+    deps.logger.error('virusscan.error', { bucket, objectKey, durationMs: Date.now() - started });
     return 'pending';
   }
 
   if (result.outcome === 'clean') {
     await deps.s3.tag(bucket, objectKey, { scan_result: 'clean' });
-    await deps.db.setAttachmentScanStatus(objectKey, 'clean');
+    if (kind === 'lab-reports') {
+      await deps.db.setAttachmentScanStatus(objectKey, 'clean');
+    } else {
+      // chat-media: flip the chat_attachments row AND release the held message,
+      // then publish ChatMessageReceived so the now-released message is
+      // delivered (HLD §4.7).
+      const released = await deps.db.setChatAttachmentScanStatus(objectKey, 'clean');
+      if (released) {
+        await deps.notifier.chatMessageReleased(released);
+      }
+    }
     deps.logger.info('virusscan.clean', {
       bucket,
       objectKey,
+      kind,
       fileSizeBytes: result.fileSizeBytes,
       durationMs: Date.now() - started,
     });
@@ -84,14 +86,21 @@ export async function processObject(
     virus_name: result.virusName ?? 'unknown',
   });
   await deps.s3.deleteObject(bucket, objectKey);
-  await deps.db.setAttachmentScanStatus(objectKey, 'quarantined');
+  if (kind === 'lab-reports') {
+    await deps.db.setAttachmentScanStatus(objectKey, 'quarantined');
+  } else {
+    // chat-media: mark the attachment quarantined; the held message is left
+    // UNRELEASED (never delivered) — setChatAttachmentScanStatus returns null
+    // for a quarantine and we do not publish a release event.
+    await deps.db.setChatAttachmentScanStatus(objectKey, 'quarantined');
+  }
   await deps.notifier.attachmentQuarantined(objectKey);
 
   deps.logger.warn('virusscan.quarantined', {
     bucket,
     objectKey,
-    // virusName is operational metadata, not PHI.
-    virusName: result.virusName ?? 'unknown',
+    kind,
+    virusName: result.virusName ?? 'unknown', // operational metadata, not PHI
     durationMs: Date.now() - started,
   });
   return 'quarantined';
