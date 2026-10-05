@@ -32,6 +32,47 @@ only ever sees their own record.
 
 ## High-level architecture
 
+```mermaid
+flowchart TB
+    subgraph clients["Clients (one responsive web app + planned native apps)"]
+        web["React SPA — apps/web<br/>patient · doctor · admin portals"]
+    end
+
+    subgraph edge["Edge — us-east-1"]
+        cf["CloudFront + WAF"]
+    end
+
+    subgraph region["AWS ap-south-1 (PHI stays in region)"]
+        apigw["API Gateway (HTTP API)<br/>+ Lambda authorizer<br/>validates session token"]
+
+        subgraph compute["Compute — apps/api functions (Lambda)"]
+            fns["auth · patient · follow-up · dose review<br/>hospital · chat · notification · admin"]
+        end
+
+        subgraph data["Stateful services"]
+            pg[("PostgreSQL — Aurora Serverless v2<br/>Row-Level Security")]
+            redis[("Redis / ElastiCache<br/>sessions · OTP · rate limits")]
+            s3[("S3<br/>lab reports · chat media")]
+            ddb[("DynamoDB<br/>audit events")]
+            sm[("Secrets Manager<br/>OAuth / SMS secrets")]
+        end
+
+        msg["SQS FIFO + SNS + EventBridge<br/>notification + reminder pipeline"]
+        ext["SMS / WhatsApp · Google / X OAuth"]
+    end
+
+    web --> cf --> apigw
+    apigw --> fns
+    fns --> pg
+    fns --> redis
+    fns --> s3
+    fns --> ddb
+    fns --> sm
+    fns --> msg
+    msg --> ext
+    fns -. "RLS session vars:<br/>user_id · role · patient_id" .-> pg
+```
+
 HealthTracker is a TypeScript monorepo (npm workspaces):
 
 - **`apps/web`** — a React single-page app (Vite) serving the patient, doctor,
