@@ -102,3 +102,55 @@ A single Node process can serve the built SPA plus a **seeded in-memory API**
 from one origin — no AWS, no database — for sharing and review. See
 [`DEMO.md`](./DEMO.md) for one-command local run and one-click deploy (Render).
 Demo data resets on restart.
+
+## References
+
+Key documents for understanding the app, grouped by what you're trying to
+learn. If you're new, read them roughly in this order: **product spec →
+development guidance → HLD → LLD**.
+
+### Product & requirements
+
+- [`docs/application-specification.md`](./docs/application-specification.md) —
+  the authoritative product spec (v1.7): users, the clinical flowchart and full
+  field catalog, hospital registry, chat, care-team/case-transfer, and
+  acceptance criteria. Start here for _what_ the product does.
+- [`docs/older-versions/`](./docs/older-versions/) — earlier spec revisions, for
+  history/context only.
+
+### Architecture & design
+
+- [`docs/HLD-AWS-Architecture.md`](./docs/HLD-AWS-Architecture.md) — High-Level
+  Design: the AWS architecture, data residency, and how the pieces fit (the
+  diagram above summarizes it).
+- [`docs/LLD-Technical-Design.md`](./docs/LLD-Technical-Design.md) — Low-Level
+  Design: database schema + RLS, the API contract and error model, and
+  per-domain pseudocode. The deepest technical reference.
+
+### Build, deploy & operations
+
+- [`docs/development-guidance.md`](./docs/development-guidance.md) — the phased
+  development plan: how work is broken into packages, the validation/gating
+  approach, and current build status.
+- [`DEMO.md`](./DEMO.md) — run the single-process CX demo locally or deploy it
+  (Render), with the demo sign-in credentials.
+- [`docs/deploy-runbook.md`](./docs/deploy-runbook.md) — bringing the real AWS
+  infrastructure up in a sandbox account (⚠️ provisions real, billing,
+  PHI-capable resources).
+- [`db/README.md`](./db/README.md) — the Flyway migration workflow (schema +
+  RLS policies for PostgreSQL 16 / Aurora).
+- [`apps/api/harness/README.md`](./apps/api/harness/README.md) — the local HTTP
+  harness that runs the real handlers over in-memory fakes (what powers the
+  demo and the smoke tests).
+
+### Security
+
+- [`docs/security/rls-authz-signoff-V3-V10.md`](./docs/security/rls-authz-signoff-V3-V10.md)
+  — the Row-Level Security / authorization decisions across migrations V3–V10
+  and their human sign-off status.
+
+### Conventions (for contributors)
+
+- [`.kiro/steering/`](./.kiro/steering/) — the always-on project rules: product
+  summary, repo structure, tech stack + commands, and coding/security
+  conventions (no PHI in logs, RLS enforcement, the response envelope, naming).
