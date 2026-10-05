@@ -15,7 +15,11 @@ services:
     region: oregon
     branch: main
     # Node version comes from .nvmrc (22).
-    buildCommand: npm ci && npm run demo:build
+    # IMPORTANT: --include=dev forces devDependencies (TypeScript, Vite, build
+    # tooling) to install even if the build env defaults to production — the
+    # demo compiles from source, so it NEEDS the dev deps at build time. Do NOT
+    # set NODE_ENV=production here, or npm ci would omit them.
+    buildCommand: npm ci --include=dev && npm run demo:build
     startCommand: npm run demo:serve
     # Render injects PORT; demo:serve honors it. The harness binds all
     # interfaces, so Render can route to it.
@@ -24,5 +28,8 @@ services:
     envVars:
       - key: WEB_DIST
         value: apps/web/dist
-      - key: NODE_ENV
-        value: production
+      # Belt-and-braces: also tell npm not to omit dev deps during the build.
+      - key: NPM_CONFIG_INCLUDE
+        value: dev
+      - key: NPM_CONFIG_PRODUCTION
+        value: 'false'
