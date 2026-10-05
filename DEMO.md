@@ -53,6 +53,30 @@ npm run demo        # builds api + SPA, then serves on PORT (default 8080)
 same-origin + demo mode) then `demo:serve` (runs the harness with
 `WEB_DIST=apps/web/dist`). Override the port with `PORT=3000 npm run demo`.
 
+## Deploy to Render (recommended — GitHub source, no Docker, no AWS)
+
+A `render.yaml` blueprint is in the repo root, so deploying is a one-time
+connect-and-apply in the Render dashboard (no CLI, no Docker):
+
+1. Create a free account at https://render.com and sign in with (or connect)
+   the GitHub account that owns `satyapaul/HealthTracker`.
+2. **New +** → **Blueprint**.
+3. Pick the repo **`satyapaul/HealthTracker`**, branch **`main`**. Render
+   detects `render.yaml` and shows a `postopcare-demo` web service.
+4. **Apply**. The first build runs `npm ci && npm run demo:build` then starts
+   `npm run demo:serve` (a few minutes).
+5. Open the URL Render assigns, e.g. `https://postopcare-demo.onrender.com`.
+   Sign in with the demo credentials below.
+
+Notes:
+
+- **Free plan sleeps after ~15 min idle**, so the first hit after idle has a
+  cold start (~30–60s). Fine for sharing/review; bump to a paid instance if you
+  want it always-on.
+- Data is in-memory and **resets on every deploy/restart** (re-seeded fixtures).
+- `autoDeploy: true` means pushing to `main` redeploys automatically.
+- Teardown: delete the service in the Render dashboard (no AWS resources exist).
+
 ## Deploy anywhere that runs Node
 
 The demo is one process on one port, so any Node/container host works

@@ -1,0 +1,28 @@
+# Render Blueprint — one-click deploy of the single-process CX demo.
+#
+# Builds the SPA + api and runs the local HTTP harness serving BOTH from one
+# origin. NO AWS, NO database — all data is in-memory harness fixtures and
+# resets on restart/redeploy. For sharing/review only, not production.
+#
+# Deploy: Render dashboard -> New + -> Blueprint -> connect
+# github.com/satyapaul/HealthTracker (branch main) -> Apply. Render reads this
+# file. See DEMO.md for the full steps + demo login.
+services:
+  - type: web
+    name: postopcare-demo
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    # Node version comes from .nvmrc (22).
+    buildCommand: npm ci && npm run demo:build
+    startCommand: npm run demo:serve
+    # Render injects PORT; demo:serve honors it. The harness binds all
+    # interfaces, so Render can route to it.
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: WEB_DIST
+        value: apps/web/dist
+      - key: NODE_ENV
+        value: production
